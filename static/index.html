@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Organizador de Disco Externo (E:)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden selection:bg-indigo-500 selection:text-white">
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md flex items-center justify-between px-3 md:px-4 z-40 flex-shrink-0">
+    <!-- Left: Hamburger (mobile), Title & Drive Badge -->
+    <div class="flex items-center space-x-2 md:space-x-3">
+      <!-- Mobile Sidebar Toggle -->
+      <button id="btn-toggle-sidebar" onclick="toggleMobileSidebar()" class="md:hidden p-2 hover:bg-slate-800 rounded-lg text-slate-300">
+        <i data-lucide="menu" class="w-5 h-5"></i>
+      </button>
+
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-sky-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 flex-shrink-0">
+        <i data-lucide="hard-drive" class="w-4 h-4 text-white"></i>
+      </div>
+      <div>
+        <div class="flex items-center space-x-1.5">
+          <h1 class="text-xs font-extrabold text-white tracking-wide truncate">ORGANIZADOR DISCO E:</h1>
+          <!-- Online status dot -->
+          <span class="flex h-2 w-2 relative" title="PC en línea">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+        </div>
+        <div class="flex items-center space-x-2 text-[10px] text-slate-400">
+          <span id="drive-used-text" class="font-mono">1.49 TB usados (40%)</span>
+          <span class="hidden sm:inline w-1 h-1 rounded-full bg-slate-600"></span>
+          <span id="drive-counts-text" class="hidden sm:inline text-indigo-400 font-semibold">Cargando...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Main Module Navigation Tabs (Desktop) -->
+    <div class="hidden md:flex items-center bg-slate-950/90 p-1 rounded-xl border border-slate-800 space-x-1">
+      <button onclick="setMainModule('explorer')" id="tab-nav-explorer" 
+              class="module-tab-btn px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition bg-indigo-600 text-white shadow">
+        <i data-lucide="folder" class="w-3.5 h-3.5"></i>
+        <span>Explorador</span>
+      </button>
+
+      <button onclick="setMainModule('foldersizes')" id="tab-nav-foldersizes" 
+              class="module-tab-btn px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition text-slate-400 hover:text-white">
+        <i data-lucide="layout-grid" class="w-3.5 h-3.5 text-sky-400"></i>
+        <span>Folder Sizes</span>
+      </button>
+
+      <button onclick="setMainModule('comparator')" id="tab-nav-comparator" 
+              class="module-tab-btn px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition text-slate-400 hover:text-white">
+        <i data-lucide="git-compare" class="w-3.5 h-3.5 text-amber-400"></i>
+        <span>Comparador (Beyond Compare)</span>
+      </button>
+
+      <button onclick="setMainModule('thumbnails')" id="tab-nav-thumbnails" 
+              class="module-tab-btn px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition text-slate-400 hover:text-white">
+        <i data-lucide="image" class="w-3.5 h-3.5 text-pink-400"></i>
+        <span>Thumbnails Studio</span>
+      </button>
+    </div>
+
+    <!-- Right: Remote Control & Actions -->
+    <div class="flex items-center space-x-1.5 md:space-x-2">
+      <!-- Remote Mobile Trigger Button -->
+      <button onclick="openRemoteControlModal()" 
+              class="px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center space-x-1.5 transition shadow"
+              title="Panel de Ejecución Remota desde el Celular">
+        <i data-lucide="smartphone" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span class="hidden sm:inline">Ejecución Remota</span>
+        <span class="sm:hidden">Remoto</span>
+      </button>
+
+      <!-- Search (Hidden on small mobile, visible on sm+) -->
+      <div class="relative hidden lg:block">
+        <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400"></i>
+        <input type="text" id="global-search-input" placeholder="Buscar carpeta o archivo..." 
+               class="bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44">
+      </div>
+
+      <!-- New Tag Button (Desktop) -->
+      <button onclick="openNewTagModal()" 
+              class="hidden sm:flex px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold items-center space-x-1 transition">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        <span>Etiqueta</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN BODY LAYOUT (SIDEBAR + CONTENT) -->
+  <div class="flex flex-1 overflow-hidden">
+    
+    <!-- LEFT SIDEBAR / MOBILE DRAWER -->
+    <aside id="sidebar-drawer" class="w-64 border-r border-slate-800/80 bg-slate-900/95 md:bg-slate-900/60 flex flex-col flex-shrink-0 select-none overflow-y-auto fixed md:static inset-y-0 left-0 z-50 md:z-auto transform -translate-x-full md:translate-x-0 transition-transform duration-200">
+      <!-- Mobile Close Drawer Header -->
+      <div class="md:hidden p-3 border-b border-slate-800 flex items-center justify-between">
+        <span class="text-xs font-bold text-white">Menú y Filtros</span>
+        <button onclick="toggleMobileSidebar()" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Drive storage bar -->
+      <div class="p-3 border-b border-slate-800/60">
+        <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1">
+          <span>Capacidad Disco E:</span>
+          <span class="font-mono text-slate-300">1.5 / 3.7 TB</span>
+        </div>
+        <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div id="drive-progress-bar" class="h-full bg-gradient-to-r from-indigo-500 to-sky-400 rounded-full transition-all duration-500" style="width: 40%"></div>
+        </div>
+      </div>
+
+      <!-- Categories Section -->
+      <div class="p-3 border-b border-slate-800/60">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Categorías Principales</h2>
+          <button onclick="resetFilters()" class="text-[10px] text-indigo-400 hover:underline">Ver Todo</button>
+        </div>
+        <div id="sidebar-categories" class="space-y-1">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+
+      <!-- Status Section -->
+      <div class="p-3 border-b border-slate-800/60">
+        <h2 class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">Estado de Organización</h2>
+        <div id="sidebar-statuses" class="space-y-1">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+
+      <!-- Tags Section -->
+      <div class="p-3 flex-1">
+        <h2 class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">Etiquetas Activas</h2>
+        <div id="sidebar-tags" class="flex flex-wrap gap-1.5">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </aside>
+
+    <!-- CENTER / RIGHT MAIN WORKSPACE -->
+    <main class="flex-1 flex flex-col min-w-0 bg-slate-950 relative overflow-hidden">
+      
+      <!-- Loading indicator -->
+      <div id="view-loading" class="hidden absolute top-2 right-4 z-50 flex items-center space-x-2 bg-slate-900/90 border border-slate-700 px-3 py-1 rounded-full text-xs text-indigo-400 shadow-xl">
+        <svg class="animate-spin h-3.5 w-3.5 text-indigo-400" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span>Cargando...</span>
+      </div>
+
+      <!-- 1. EXPLORER VIEW WRAPPER (GRID & LIST) -->
+      <div id="explorer-view-wrapper" class="flex-1 flex flex-col overflow-hidden">
+        
+        <!-- Breadcrumbs & Explorer Header -->
+        <div class="h-12 border-b border-slate-800/80 bg-slate-900/40 px-4 flex items-center justify-between flex-shrink-0">
+          <div class="flex items-center space-x-2 overflow-x-auto py-1" id="breadcrumbs-bar">
+            <!-- Breadcrumbs rendered here -->
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <!-- Explorer view switcher: Grid vs Organigram vs List -->
+            <div class="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 space-x-0.5">
+              <button onclick="setView('grid')" data-view="grid" class="view-btn px-2.5 py-1 rounded text-xs font-semibold bg-indigo-600 text-white">
+                Galería
+              </button>
+              <button onclick="setView('organigram')" data-view="organigram" class="view-btn px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white">
+                Organigrama
+              </button>
+              <button onclick="setView('list')" data-view="list" class="view-btn px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white">
+                Lista
+              </button>
+            </div>
+
+            <!-- Sort dropdown -->
+            <div class="flex items-center space-x-1 text-xs text-slate-400">
+              <span>Ordenar:</span>
+              <select id="sort-select" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none">
+                <option value="name-asc">Nombre (A-Z)</option>
+                <option value="name-desc">Nombre (Z-A)</option>
+                <option value="size-desc">Mayor tamaño</option>
+                <option value="size-asc">Menor tamaño</option>
+                <option value="date-desc">Más reciente</option>
+              </select>
+            </div>
+
+            <!-- Open current in Windows -->
+            <button onclick="openInExplorer(state.currentPath)" 
+                    class="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition flex items-center space-x-1 text-xs"
+                    title="Abrir carpeta actual en Explorador de Windows">
+              <i data-lucide="folder-symlink" class="w-4 h-4"></i>
+              <span class="hidden sm:inline">Abrir en Windows</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Folder Overview Banner -->
+        <div class="px-5 py-3 border-b border-slate-800/40 bg-slate-900/20 flex items-center justify-between">
+          <div>
+            <h2 id="current-folder-title" class="text-base font-extrabold text-white">Disco Externo (E:)</h2>
+            <div class="flex items-center space-x-2 mt-0.5">
+              <span id="current-folder-category" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                Categoría
+              </span>
+              <span id="current-folder-status" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                Por Revisar
+              </span>
+            </div>
+          </div>
+
+          <!-- Quick Select Buttons -->
+          <div class="flex items-center space-x-2 text-xs">
+            <button onclick="selectAllFolders()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition">
+              + Seleccionar Carpetas
+            </button>
+            <button onclick="selectAllFiles()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition">
+              + Seleccionar Archivos
+            </button>
+          </div>
+        </div>
+
+        <!-- Explorer Content Area (Scrollable) -->
+        <div id="explorer-content" class="flex-1 overflow-y-auto p-5">
+          <!-- Dynamically populated Grid or List -->
+        </div>
+      </div>
+
+      <!-- 2. ORGANIGRAM VIEW WRAPPER -->
+      <div id="organigram-view-wrapper" class="hidden flex-1 relative overflow-hidden">
+        <div id="organigram-container" class="w-full h-full">
+          <!-- Interactive Organigram SVG injected here -->
+        </div>
+      </div>
+
+      <!-- 3. FOLDER SIZES VIEW WRAPPER -->
+      <div id="foldersizes-view-wrapper" class="hidden flex-1 relative overflow-hidden">
+        <div id="foldersizes-container" class="w-full h-full">
+          <!-- Interactive Treemap injected here -->
+        </div>
+      </div>
+
+      <!-- 4. COMPARATOR (BEYOND COMPARE) VIEW WRAPPER -->
+      <div id="comparator-view-wrapper" class="hidden flex-1 relative overflow-hidden">
+        <div id="comparator-container" class="w-full h-full">
+          <!-- Interactive Beyond Compare diff engine injected here -->
+        </div>
+      </div>
+
+      <!-- 5. THUMBNAILS STUDIO VIEW WRAPPER -->
+      <div id="thumbnails-view-wrapper" class="hidden flex-1 relative overflow-hidden">
+        <div id="thumbnails-container" class="w-full h-full">
+          <!-- Interactive Thumbnails Studio injected here -->
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- FLOATING BATCH ACTIONS TOOLBAR (Appears when items are selected) -->
+  <div id="floating-batch-toolbar" class="hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 animate-slide-up">
+    <div class="glass px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-indigo-500/30 ring-1 ring-indigo-500/20">
+      
+      <!-- Selection Counter -->
+      <div class="flex items-center space-x-2 pr-2 border-r border-slate-700">
+        <div class="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></div>
+        <span id="selected-count-badge" class="text-xs font-bold text-white font-mono">0 seleccionados</span>
+      </div>
+
+      <!-- Action: Batch Tag -->
+      <button onclick="openBatchTagModal()" 
+              class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-lg shadow-indigo-600/30 transition">
+        <i data-lucide="tag" class="w-3.5 h-3.5"></i>
+        <span>Etiquetar</span>
+      </button>
+
+      <!-- Action: Set Category Dropdown -->
+      <div class="relative group">
+        <button class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition">
+          <i data-lucide="folder" class="w-3.5 h-3.5 text-sky-400"></i>
+          <span>Categoría</span>
+          <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+        </button>
+        <div class="absolute bottom-full mb-2 left-0 hidden group-hover:block w-52 bg-slate-900 border border-slate-700 rounded-xl p-1.5 shadow-2xl space-y-1">
+          <button onclick="batchSetCategory('Arquitectura & 3D (Work)')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">🏗️ Arquitectura & 3D (Work)</button>
+          <button onclick="batchSetCategory('Software & Instaladores')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">💻 Software & Instaladores</button>
+          <button onclick="batchSetCategory('Respaldos Celular')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">📱 Respaldos Celular</button>
+          <button onclick="batchSetCategory('Fotografía & Álbumes')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">📸 Fotografía & Álbumes</button>
+          <button onclick="batchSetCategory('Respaldos de Equipos / Personas')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">💾 Respaldos Equipos / Personas</button>
+          <button onclick="batchSetCategory('Descargas Masivas')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">📥 Descargas Masivas</button>
+          <button onclick="batchSetCategory('Videos & Ejercicio')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">🎬 Videos & Ejercicio</button>
+          <button onclick="batchSetCategory('Cursos, Ebooks & Salud')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-200">📚 Cursos, Ebooks & Salud</button>
+        </div>
+      </div>
+
+      <!-- Action: Set Status Dropdown -->
+      <div class="relative group">
+        <button class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition">
+          <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span>Estado</span>
+          <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+        </button>
+        <div class="absolute bottom-full mb-2 left-0 hidden group-hover:block w-48 bg-slate-900 border border-slate-700 rounded-xl p-1.5 shadow-2xl space-y-1">
+          <button onclick="batchSetStatus('Organizado')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-emerald-400 font-semibold">✓ Organizado</button>
+          <button onclick="batchSetStatus('Por Revisar')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-amber-400 font-semibold">🔍 Por Revisar</button>
+          <button onclick="batchSetStatus('Duplicado / Posible Basura')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-red-400 font-semibold">⚠️ Duplicado / Posible Basura</button>
+          <button onclick="batchSetStatus('Importante / Crítico')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-purple-400 font-semibold">⭐ Importante / Crítico</button>
+          <button onclick="batchSetStatus('Archivado')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 text-slate-400 font-semibold">📦 Archivado</button>
+        </div>
+      </div>
+
+      <!-- Clear selection -->
+      <button onclick="clearSelection()" 
+              class="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition"
+              title="Limpiar selección (Esc)">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+
+    </div>
+  </div>
+
+  <!-- MODAL: BATCH TAGGING -->
+  <div id="batch-tag-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+      
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="tag" class="w-4 h-4"></i>
+          </div>
+          <h3 class="text-sm font-bold text-white">Etiquetar Elementos Seleccionados</h3>
+        </div>
+        <button onclick="closeBatchTagModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="p-4 overflow-y-auto flex-1">
+        <p class="text-xs text-slate-400 mb-3">Marca las etiquetas que deseas asignar a todos los elementos seleccionados:</p>
+        <div id="modal-tag-list" class="grid grid-cols-2 gap-2">
+          <!-- Tag checkboxes dynamically inserted -->
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-slate-800 bg-slate-950/50 flex items-center justify-between">
+        <button onclick="openNewTagModal()" class="text-xs text-indigo-400 hover:underline flex items-center space-x-1">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+          <span>Crear nueva etiqueta</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="closeBatchTagModal()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700">
+            Cancelar
+          </button>
+          <button onclick="applyBatchTags()" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30">
+            Aplicar Etiquetas
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL: CREATE NEW TAG -->
+  <div id="new-tag-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm shadow-2xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+          <i data-lucide="tag" class="w-4 h-4 text-indigo-400"></i>
+          <span>Nueva Etiqueta Personalizada</span>
+        </h3>
+        <button onclick="closeNewTagModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Nombre de la Etiqueta</label>
+          <input type="text" id="new-tag-name" placeholder="Ej: Proyecto Casa Blanca, Importante..." 
+                 class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Tipo de Etiqueta</label>
+          <select id="new-tag-type" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none">
+            <option value="custom">Personalizada</option>
+            <option value="category">Categoría</option>
+            <option value="status">Estado</option>
+            <option value="owner">Propietario</option>
+            <option value="content">Contenido</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Color</label>
+          <div class="flex items-center space-x-2">
+            <input type="color" id="new-tag-color" value="#6366f1" class="w-8 h-8 rounded border-0 cursor-pointer bg-transparent">
+            <span class="text-xs font-mono text-slate-400" id="color-hex-preview">#6366f1</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 flex items-center justify-end space-x-2">
+        <button onclick="closeNewTagModal()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700">
+          Cancelar
+        </button>
+        <button onclick="saveNewTag()" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg">
+          Guardar Etiqueta
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: LIGHTBOX MEDIA PREVIEW -->
+  <div id="media-lightbox-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
+    <div class="relative w-full max-w-5xl flex flex-col items-center">
+      <!-- Top Bar -->
+      <div class="w-full flex items-center justify-between pb-3 text-white">
+        <div class="min-w-0 pr-4">
+          <h3 id="lightbox-title" class="text-sm font-bold truncate">Archivo</h3>
+          <p id="lightbox-path" class="text-[11px] text-slate-400 font-mono truncate">Ruta</p>
+        </div>
+        <div class="flex items-center space-x-2 flex-shrink-0">
+          <button onclick="openInExplorer(document.getElementById('lightbox-path').innerText)" 
+                  class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center space-x-1">
+            <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+            <span>Abrir en Windows</span>
+          </button>
+          <button onclick="closeLightbox()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Media Preview Container -->
+      <div id="lightbox-media-container" class="w-full flex items-center justify-center my-2">
+        <!-- Rendered Image, Video player, or doc info -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MOBILE BOTTOM NAVIGATION (Visible only on mobile screens) -->
+  <nav class="md:hidden h-14 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md flex items-center justify-around px-2 z-40 flex-shrink-0">
+    <button onclick="setMainModule('explorer')" id="mob-nav-explorer" class="flex flex-col items-center justify-center text-indigo-400 p-1 flex-1">
+      <i data-lucide="folder" class="w-4 h-4 mb-0.5"></i>
+      <span class="text-[9px] font-semibold">Explorar</span>
+    </button>
+    <button onclick="setMainModule('foldersizes')" id="mob-nav-foldersizes" class="flex flex-col items-center justify-center text-slate-400 p-1 flex-1">
+      <i data-lucide="layout-grid" class="w-4 h-4 mb-0.5"></i>
+      <span class="text-[9px] font-semibold">Sizes</span>
+    </button>
+    <button onclick="setMainModule('comparator')" id="mob-nav-comparator" class="flex flex-col items-center justify-center text-slate-400 p-1 flex-1">
+      <i data-lucide="git-compare" class="w-4 h-4 mb-0.5"></i>
+      <span class="text-[9px] font-semibold">Compare</span>
+    </button>
+    <button onclick="setMainModule('thumbnails')" id="mob-nav-thumbnails" class="flex flex-col items-center justify-center text-slate-400 p-1 flex-1">
+      <i data-lucide="image" class="w-4 h-4 mb-0.5"></i>
+      <span class="text-[9px] font-semibold">Thumbs</span>
+    </button>
+    <button onclick="openRemoteControlModal()" class="flex flex-col items-center justify-center text-emerald-400 p-1 flex-1">
+      <i data-lucide="zap" class="w-4 h-4 mb-0.5"></i>
+      <span class="text-[9px] font-semibold">Acciones</span>
+    </button>
+  </nav>
+
+  <!-- MODAL: CENTRO DE CONTROL REMOTO DESDE EL CELULAR -->
+  <div id="remote-control-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div class="flex items-center space-x-2">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="smartphone" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Centro de Ejecución Remota</h3>
+            <span class="text-[10px] text-emerald-400 font-mono">● Conectado a PC Local (Disco E:)</span>
+          </div>
+        </div>
+        <button onclick="closeRemoteControlModal()" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-4 space-y-3">
+        <p class="text-xs text-slate-300">
+          Toca cualquiera de los botones para disparar la consulta o proceso en tu computadora local:
+        </p>
+
+        <!-- Button 1: Folder Sizes Space Map -->
+        <button onclick="triggerRemoteFolderSizes()" class="w-full p-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-sky-500/30 text-left transition flex items-center justify-between group">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="layout-grid" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-white group-hover:text-sky-300">1. Consultar / Re-analizar Folder Sizes</h4>
+              <p class="text-[10px] text-slate-400">Recalcula fragmentación y distribución de espacio por etiquetas</p>
+            </div>
+          </div>
+          <i data-lucide="arrow-right" class="w-4 h-4 text-slate-500 group-hover:text-sky-400"></i>
+        </button>
+
+        <!-- Button 2: Beyond Compare Duplicates -->
+        <button onclick="triggerRemoteBeyondCompare()" class="w-full p-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-amber-500/30 text-left transition flex items-center justify-between group">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="git-compare" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-white group-hover:text-amber-300">2. Ejecutar Escáner Beyond Compare</h4>
+              <p class="text-[10px] text-slate-400">Escanea y detecta carpetas duplicadas o variantes en el disco</p>
+            </div>
+          </div>
+          <i data-lucide="arrow-right" class="w-4 h-4 text-slate-500 group-hover:text-amber-400"></i>
+        </button>
+
+        <!-- Button 3: Thumbnails Generator -->
+        <button onclick="triggerRemoteThumbnails()" class="w-full p-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-pink-500/30 text-left transition flex items-center justify-between group">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="image" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-white group-hover:text-pink-300">3. Iniciar Thumbnails Generator</h4>
+              <p class="text-[10px] text-slate-400">Genera miniaturas de fotos, videos y PDFs en segundo plano</p>
+            </div>
+          </div>
+          <i data-lucide="arrow-right" class="w-4 h-4 text-slate-500 group-hover:text-pink-400"></i>
+        </button>
+
+        <!-- Button 4: Auto-Categorize -->
+        <button onclick="triggerRemoteAutoCategorize()" class="w-full p-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-indigo-500/30 text-left transition flex items-center justify-between group">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="sparkles" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-xs font-bold text-white group-hover:text-indigo-300">4. Auto-Categorizar Disco E:</h4>
+              <p class="text-[10px] text-slate-400">Aplica reglas inteligentes para clasificar y etiquetar carpetas</p>
+            </div>
+          </div>
+          <i data-lucide="arrow-right" class="w-4 h-4 text-slate-500 group-hover:text-indigo-400"></i>
+        </button>
+
+        <!-- Connection Settings Box -->
+        <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px]">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-slate-400 font-semibold">Túnel de Conexión a tu PC:</span>
+            <span id="remote-conn-status" class="text-emerald-400 font-mono text-[10px]">● En Vivo</span>
+          </div>
+          <div class="flex items-center space-x-1.5">
+            <input type="text" id="cfg-tunnel-url" placeholder="https://xxx.trycloudflare.com" 
+                   class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-indigo-500">
+            <button onclick="saveTunnelUrl()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
+              Conectar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-3 border-t border-slate-800 bg-slate-950/40 flex items-center justify-between text-[11px] text-slate-400">
+        <span class="font-mono text-emerald-400">● Compatible Vercel + PC Local</span>
+        <button onclick="closeRemoteControlModal()" class="px-3 py-1 rounded bg-slate-800 text-slate-200 font-semibold hover:bg-slate-700">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATIONS CONTAINER -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- Scripts -->
+  <script src="/static/organigram.js"></script>
+  <script src="/static/treemap.js"></script>
+  <script src="/static/comparator.js"></script>
+  <script src="/static/thumbnails_studio.js"></script>
+  <script src="/static/app.js"></script>
+  <script>
+    function openNewTagModal() {
+      document.getElementById('new-tag-modal').classList.remove('hidden');
+    }
+    function closeNewTagModal() {
+      document.getElementById('new-tag-modal').classList.add('hidden');
+    }
+    async function saveNewTag() {
+      const name = document.getElementById('new-tag-name').value.trim();
+      const tag_type = document.getElementById('new-tag-type').value;
+      const color = document.getElementById('new-tag-color').value;
+      if (!name) {
+        showToast("Escribe un nombre para la etiqueta", "error");
+        return;
+      }
+      try {
+        const res = await fetch('/api/tags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, tag_type, color })
+        });
+        if (!res.ok) throw new Error("Error al crear etiqueta");
+        showToast(`Etiqueta "${name}" creada`, "success");
+        closeNewTagModal();
+        document.getElementById('new-tag-name').value = '';
+        fetchTags();
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+    document.getElementById('new-tag-color').oninput = (e) => {
+      document.getElementById('color-hex-preview').innerText = e.target.value;
+    };
+  </script>
+</body>
+</html>

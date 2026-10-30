@@ -1,0 +1,23 @@
+# Ignore binary installers and tools
+*.exe
+*.zip
+*.rar
+*.iso
+
+# Ignore SQLite local database & cache
+*.db
+*.db-wal
+*.db-shm
+.cache/
+thumbnails/
+
+# Python & System
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+.env
+.DS_Store
+
+# Vercel
+.vercel/
