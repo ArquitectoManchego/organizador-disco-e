@@ -483,19 +483,59 @@ def trigger_scan(background_tasks: BackgroundTasks, max_depth: int = 4):
     return {"success": True, "message": f"Escaneo en segundo plano iniciado (profundidad {max_depth})"}
 
 # ==========================================
-# MODULE 1: FOLDER SIZES & TAG SPACE TREEMAP
+# MODULE 1: FOLDER SIZES & FILE ANALYSIS TREEMAP
 # ==========================================
 
 @app.get("/api/foldersizes/treemap")
 def get_foldersizes_treemap(
     path: str = Query("E:\\"),
     canvas_w: float = Query(1200),
-    canvas_h: float = Query(700)
+    canvas_h: float = Query(700),
+    view_mode: str = Query("both"),
+    top_files_limit: int = Query(150)
 ):
     try:
-        return foldersizes_engine.get_folder_treemap(parent_path=path, canvas_w=canvas_w, canvas_h=canvas_h)
+        return foldersizes_engine.get_folder_treemap(
+            parent_path=path,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+            view_mode=view_mode,
+            top_files_limit=top_files_limit
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/files-analysis")
+def get_files_analysis_endpoint(
+    path: Optional[str] = Query(None),
+    limit: int = Query(100)
+):
+    """
+    FolderSizes deep file analysis: Largest Files, File Types breakdown, 
+    File Size distribution brackets, File Age brackets, and Tag partitions.
+    """
+    try:
+        return foldersizes_engine.get_files_analysis(parent_path=path, limit_largest=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AnalyzeFilesRequest(BaseModel):
+    root_dir: str = "E:\\"
+
+@app.post("/api/foldersizes/analyze-files")
+def trigger_analyze_files(req: Optional[AnalyzeFilesRequest] = None):
+    """
+    Triggers local background scanning and indexing of all files across the drive.
+    Callable remotely from Vercel / mobile phone to update PC information.
+    """
+    root = req.root_dir if req and req.root_dir else "E:\\"
+    res = foldersizes_engine.analysis_manager.start_analysis(root_dir=root)
+    return res
+
+@app.get("/api/foldersizes/analysis-status")
+def get_analyze_files_status():
+    """Returns real-time file indexing status, progress count, elapsed seconds, and metrics."""
+    return foldersizes_engine.analysis_manager.get_status()
 
 @app.get("/api/foldersizes/tag-space")
 def get_tag_space_analytics():

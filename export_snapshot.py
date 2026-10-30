@@ -97,8 +97,10 @@ def export_all():
     }
 
     # 4. Folder Sizes Treemap for root & Tag Space
-    fs_treemap = foldersizes_engine.get_folder_treemap("E:\\", 1200, 700)
+    fs_treemap = foldersizes_engine.get_folder_treemap("E:\\", 1200, 700, view_mode="both")
+    fs_treemap_files = foldersizes_engine.get_folder_treemap("E:\\", 1200, 700, view_mode="files")
     tag_space = foldersizes_engine.get_tag_space_distribution()
+    files_analysis = foldersizes_engine.get_files_analysis(parent_path=None, limit_largest=150)
 
     # 5. Drive Duplicates
     drive_dupes = compare_engine.scan_drive_for_duplicates("E:\\")
@@ -180,6 +182,8 @@ def export_all():
         "tags": tags_grouped,
         "organigram": organigram_data,
         "foldersizes_treemap": fs_treemap,
+        "foldersizes_treemap_files": fs_treemap_files,
+        "files_analysis": files_analysis,
         "tag_space": tag_space,
         "drive_duplicates": drive_dupes,
         "explore_cache": explored_cache

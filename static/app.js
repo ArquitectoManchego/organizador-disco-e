@@ -6,7 +6,7 @@
 window.API_BASE = localStorage.getItem('organizador_api_base') || (
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
     ? '' 
-    : 'https://rank-royalty-charger-dishes.trycloudflare.com'
+    : 'https://springfield-hull-miscellaneous-individuals.trycloudflare.com'
 );
 
 let cachedSnapshot = null;
@@ -68,8 +68,12 @@ window.fetch = async function(url, options = {}) {
         return new Response(JSON.stringify(snap.tags), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/organigram')) {
         return new Response(JSON.stringify(snap.organigram), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/files-analysis')) {
+        return new Response(JSON.stringify(snap.files_analysis), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/foldersizes/treemap')) {
-        return new Response(JSON.stringify(snap.foldersizes_treemap), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        const isFiles = url.includes('view_mode=files');
+        const nodeData = isFiles && snap.foldersizes_treemap_files ? snap.foldersizes_treemap_files : snap.foldersizes_treemap;
+        return new Response(JSON.stringify(nodeData), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/foldersizes/tag-space')) {
         return new Response(JSON.stringify(snap.tag_space), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/compare/drive-duplicates')) {
@@ -1194,4 +1198,47 @@ async function triggerRemoteThumbnails() {
 async function triggerRemoteAutoCategorize() {
   closeRemoteControlModal();
   await triggerAutoCategorize();
+}
+
+// 5. Trigger Remote File Analysis (Deep Scan & Classification)
+async function triggerRemoteFileAnalysis() {
+  showToast("Iniciando análisis profundo de archivos en la PC...", "info");
+  try {
+    const res = await fetch('/api/foldersizes/analyze-files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root_dir: 'E:\\' })
+    });
+    const data = await res.json();
+    if (data.status === 'already_running') {
+      showToast("El escáner de archivos ya está corriendo en la PC", "info");
+    } else {
+      showToast("Escaneo de archivos iniciado en tu PC local", "success");
+    }
+
+    let pollInterval = setInterval(async () => {
+      try {
+        const sRes = await fetch('/api/foldersizes/analysis-status');
+        const st = await sRes.json();
+        if (st.is_running) {
+          showToast(`PC analizando: ${st.files_scanned.toLocaleString()} archivos...`, "info");
+        } else {
+          clearInterval(pollInterval);
+          showToast("¡Análisis de archivos completado en la PC!", "success");
+          if (window.folderSizesInstance) {
+            if (window.folderSizesInstance.currentMode === 'reports') {
+              window.folderSizesInstance.loadFilesAnalysis();
+            } else {
+              window.folderSizesInstance.loadTreemap(window.folderSizesInstance.currentPath, window.folderSizesInstance.currentMode);
+            }
+          }
+        }
+      } catch (err) {
+        clearInterval(pollInterval);
+      }
+    }, 3000);
+
+  } catch (e) {
+    showToast("No se pudo contactar a la PC: " + e.message, "error");
+  }
 }
