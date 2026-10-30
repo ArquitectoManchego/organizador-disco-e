@@ -287,7 +287,7 @@ class FolderSizesTreemap {
     const footerStats = document.getElementById('fs-footer-stats');
     if (footerStats) {
       footerStats.innerHTML = `
-        <span>📦 ${this.data.total_items} bloques (${this.data.total_folders || 0} carpetas, ${this.data.total_files || 0} archivos)</span>
+        <span>📦 ${this.data.total_items} bloques principales</span>
         <span>•</span>
         <span>💾 Total: ${formatBytes(totalBytes)}</span>
         <span>•</span>
@@ -310,70 +310,164 @@ class FolderSizesTreemap {
       'Otros Archivos': '#475569'
     };
 
-    filteredNodes.forEach(node => {
+    const extColors = {
+      '.iso': '#7c3aed',
+      '.bin': '#6366f1',
+      '.exe': '#9333ea',
+      '.msi': '#a855f7',
+      '.zip': '#d97706',
+      '.rar': '#f59e0b',
+      '.7z': '#b45309',
+      '.mp4': '#dc2626',
+      '.mov': '#ef4444',
+      '.mkv': '#b91c1c',
+      '.avi': '#e11d48',
+      '.jpg': '#db2777',
+      '.jpeg': '#ec4899',
+      '.png': '#f43f5e',
+      '.psd': '#be185d',
+      '.skp': '#0284c7',
+      '.max': '#0369a1',
+      '.dwg': '#0ea5e9',
+      '.blend': '#f97316',
+      '.mp3': '#2563eb',
+      '.pdf': '#059669',
+      '.docx': '#0284c7',
+      '.xlsx': '#16a34a'
+    };
+
+    // Graded gray borders and headers per level as requested by user
+    const levelStyles = {
+      1: { border: '2.5px solid #0f172a', headerBg: '#0f172a', bg: '#080d16', text: 'text-white' },
+      2: { border: '2px solid #334155', headerBg: '#1e293b', bg: '#0f172a', text: 'text-slate-200' },
+      3: { border: '1.5px solid #475569', headerBg: '#334155', bg: '#1e293b', text: 'text-slate-300' },
+      4: { border: '1px solid #64748b', headerBg: '#475569', bg: '#293548', text: 'text-slate-300' }
+    };
+
+    const renderNodeRecursive = (node, parentEl) => {
       const r = node.rect;
       if (!r || r.w <= 4 || r.h <= 4) return;
 
-      let bgColor = '#334155';
-      if (this.colorMode === 'category') {
-        bgColor = catColors[node.category] || '#475569';
-      } else if (this.colorMode === 'status') {
-        if (node.status === 'Duplicado / Posible Basura') bgColor = '#ef4444';
-        else if (node.status === 'Organizado') bgColor = '#10b981';
-        else if (node.status === 'Archivado') bgColor = '#6b7280';
-        else bgColor = '#f59e0b';
-      } else if (this.colorMode === 'tag' && node.tags && node.tags.length > 0) {
-        bgColor = node.tags[0].color || '#6366f1';
-      }
-
       const pct = ((node.value / totalBytes) * 100).toFixed(1);
+      const isContainer = (node.is_container && node.children && node.children.length > 0);
       const isFile = (node.type === 'file');
+      const level = node.level || 1;
+      const style = levelStyles[level] || levelStyles[4];
 
-      const tile = document.createElement('div');
-      tile.className = `absolute rounded border ${isFile ? 'border-dashed border-white/40' : 'border-black/50'} hover:border-white transition-all duration-150 cursor-pointer overflow-hidden p-1.5 flex flex-col justify-between group`;
-      tile.style.left = `${r.x}px`;
-      tile.style.top = `${r.y}px`;
-      tile.style.width = `${r.w}px`;
-      tile.style.height = `${r.h}px`;
-      tile.style.backgroundColor = bgColor;
-      tile.style.opacity = isFile ? '0.88' : '0.96';
+      if (isContainer) {
+        // CONTAINER FOLDER NODE (subdivided into child boxes)
+        const box = document.createElement('div');
+        box.className = 'absolute rounded overflow-hidden flex flex-col group';
+        box.style.left = `${r.x}px`;
+        box.style.top = `${r.y}px`;
+        box.style.width = `${r.w}px`;
+        box.style.height = `${r.h}px`;
+        box.style.border = style.border;
+        box.style.backgroundColor = style.bg;
 
-      const showTitle = (r.w >= 54 && r.h >= 28);
-      const showDetails = (r.w >= 90 && r.h >= 48);
-
-      tile.innerHTML = `
-        ${showTitle ? `
-          <div class="min-w-0 pointer-events-none">
-            <h4 class="text-[11px] font-bold text-white truncate drop-shadow-md flex items-center space-x-1">
-              <span>${isFile ? '📄' : '📁'}</span>
+        // Header bar if big enough
+        const showHeader = (r.w >= 56 && r.h >= 24);
+        if (showHeader) {
+          const header = document.createElement('div');
+          const hHeight = (level === 1 ? '20px' : (level === 2 ? '17px' : '15px'));
+          header.className = `w-full flex items-center justify-between px-2 select-none cursor-pointer flex-shrink-0 text-[10px] font-mono font-bold ${style.text} hover:opacity-95 transition`;
+          header.style.backgroundColor = style.headerBg;
+          header.style.height = hHeight;
+          header.innerHTML = `
+            <div class="flex items-center space-x-1.5 truncate pr-1 pointer-events-none">
+              <span>📁</span>
               <span class="truncate">${node.name}</span>
-            </h4>
-            <span class="text-[10px] text-white/90 font-mono drop-shadow-sm">${formatBytes(node.value)} (${pct}%)</span>
-          </div>
-        ` : ''}
-
-        ${showDetails ? `
-          <div class="flex items-center justify-between text-[9px] text-white/90 font-medium drop-shadow-sm pointer-events-none">
-            <span>${isFile ? (node.extension || 'Archivo') : (node.file_count || 0) + ' arch'}</span>
-            ${node.tag_count > 0 ? `<span class="bg-black/40 px-1 py-0.5 rounded text-[8px] font-bold">🏷️ ${node.tag_count}</span>` : ''}
-          </div>
-        ` : ''}
-      `;
-
-      tile.onmouseenter = (e) => this.showTooltip(e, node, pct);
-      tile.onmousemove = (e) => this.moveTooltip(e);
-      tile.onmouseleave = () => this.hideTooltip();
-
-      tile.onclick = () => {
-        if (!isFile) {
-          this.loadTreemap(node.path, this.currentMode);
-        } else {
-          previewMedia(node.path, node.extension);
+              <span class="opacity-75 text-[9px] font-normal font-mono">(${formatBytes(node.size_bytes || node.value)})</span>
+            </div>
+            <button class="text-slate-400 hover:text-white p-0.5" title="Explorar esta carpeta">
+              <i data-lucide="zoom-in" class="w-3 h-3"></i>
+            </button>
+          `;
+          header.onclick = (e) => {
+            e.stopPropagation();
+            this.loadTreemap(node.path, this.currentMode);
+          };
+          box.appendChild(header);
         }
-      };
 
-      container.appendChild(tile);
-    });
+        // Hover tooltip on container border/header
+        box.onmouseenter = (e) => this.showTooltip(e, node, pct);
+        box.onmousemove = (e) => this.moveTooltip(e);
+        box.onmouseleave = () => this.hideTooltip();
+
+        parentEl.appendChild(box);
+
+        // Render each child recursively directly on the canvas
+        node.children.forEach(child => renderNodeRecursive(child, parentEl));
+
+      } else {
+        // LEAF NODE (File or terminal folder block)
+        let bgColor = '#334155';
+        if (isFile && node.extension && extColors[node.extension.toLowerCase()]) {
+          bgColor = extColors[node.extension.toLowerCase()];
+        } else if (this.colorMode === 'category') {
+          bgColor = catColors[node.category] || '#475569';
+        } else if (this.colorMode === 'status') {
+          if (node.status === 'Duplicado / Posible Basura') bgColor = '#ef4444';
+          else if (node.status === 'Organizado') bgColor = '#10b981';
+          else if (node.status === 'Archivado') bgColor = '#6b7280';
+          else bgColor = '#f59e0b';
+        } else if (this.colorMode === 'tag' && node.tags && node.tags.length > 0) {
+          bgColor = node.tags[0].color || '#6366f1';
+        }
+
+        const tile = document.createElement('div');
+        tile.className = `absolute rounded border ${isFile ? 'border-black/50' : 'border-slate-800/80'} hover:border-white transition-all duration-100 cursor-pointer overflow-hidden p-1 flex flex-col justify-between group shadow-sm`;
+        tile.style.left = `${r.x}px`;
+        tile.style.top = `${r.y}px`;
+        tile.style.width = `${r.w}px`;
+        tile.style.height = `${r.h}px`;
+        tile.style.backgroundColor = bgColor;
+        tile.style.opacity = isFile ? '0.94' : '0.98';
+
+        const showTitle = (r.w >= 48 && r.h >= 22);
+        const showDetails = (r.w >= 85 && r.h >= 42);
+
+        tile.innerHTML = `
+          ${showTitle ? `
+            <div class="min-w-0 pointer-events-none">
+              <h4 class="text-[10px] font-bold text-white truncate drop-shadow-md flex items-center space-x-1">
+                <span>${isFile ? '📄' : '📁'}</span>
+                <span class="truncate">${node.name}</span>
+              </h4>
+              <span class="text-[9px] text-white/90 font-mono drop-shadow-sm">${formatBytes(node.size_bytes || node.value)} (${pct}%)</span>
+            </div>
+          ` : ''}
+
+          ${showDetails ? `
+            <div class="flex items-center justify-between text-[8.5px] text-white/90 font-medium drop-shadow-sm pointer-events-none">
+              <span class="font-mono bg-black/30 px-1 rounded uppercase">${isFile ? (node.extension || 'file') : (node.file_count || 0) + ' arch'}</span>
+              ${node.tags && node.tags.length > 0 ? `<span class="bg-black/40 px-1 py-0.2 rounded text-[8px] font-bold">🏷️ ${node.tags.length}</span>` : ''}
+            </div>
+          ` : ''}
+        `;
+
+        tile.onmouseenter = (e) => {
+          e.stopPropagation();
+          this.showTooltip(e, node, pct);
+        };
+        tile.onmousemove = (e) => this.moveTooltip(e);
+        tile.onmouseleave = () => this.hideTooltip();
+
+        tile.onclick = (e) => {
+          e.stopPropagation();
+          if (!isFile) {
+            this.loadTreemap(node.path, this.currentMode);
+          } else {
+            previewMedia(node.path, node.extension);
+          }
+        };
+
+        parentEl.appendChild(tile);
+      }
+    };
+
+    filteredNodes.forEach(rootNode => renderNodeRecursive(rootNode, container));
   }
 
   renderFilesAnalysisReports(container) {

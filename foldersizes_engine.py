@@ -98,14 +98,235 @@ def compute_squarified_treemap(items: List[Dict[str, Any]], x: float, y: float, 
 
     return results
 
+def get_nested_treemap(parent_path: str = "E:\\", canvas_w: float = 1200, canvas_h: float = 700, 
+                       max_nesting_depth: int = 4) -> Dict[str, Any]:
+    """
+    Genuine Hierarchical Nested Treemap (FolderSizes Space Map equivalent):
+    Recursively subdivides folders into their subfolders and files.
+    Each nesting level is framed with graded gray borders and distinct depth headers:
+    - Level 1: Darkest gray/charcoal (#0f172a, 2.5px solid)
+    - Level 2: Medium-dark slate (#334155, 2px solid)
+    - Level 3: Soft slate (#475569, 1.5px solid)
+    - Level 4: Light slate (#64748b, 1px solid)
+    Leaf files and terminal items are filled colorful cushions with category/extension colors.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    norm_parent = parent_path.rstrip("\\")
+    is_root = (parent_path in ["E:\\", "E:", "E:/", ""])
+
+    # Preload all active folders
+    cursor.execute("""
+    SELECT path, name, parent_path, depth, size_bytes, file_count, subfolder_count, category, status, owner 
+    FROM folders WHERE size_bytes > 0;
+    """)
+    folders_by_parent: Dict[str, List[Dict[str, Any]]] = {}
+    folder_dict: Dict[str, Dict[str, Any]] = {}
+    for r in cursor.fetchall():
+        d = dict(r)
+        folder_dict[d["path"]] = d
+        p = d["parent_path"].rstrip("\\")
+        folders_by_parent.setdefault(p, []).append(d)
+
+    # Preload top files per folder (> 10KB)
+    cursor.execute("""
+    SELECT path, name, folder_path, extension, size_bytes, category, status, owner, mtime
+    FROM files 
+    WHERE size_bytes > 10240
+    ORDER BY size_bytes DESC;
+    """)
+    files_by_folder: Dict[str, List[Dict[str, Any]]] = {}
+    for r in cursor.fetchall():
+        d = dict(r)
+        p = d["folder_path"].rstrip("\\")
+        if len(files_by_folder.setdefault(p, [])) < 30:
+            files_by_folder[p].append(d)
+
+    # Preload tags
+    cursor.execute("""
+    SELECT it.item_path, it.item_type, t.id, t.name, t.color, t.tag_type
+    FROM item_tags it
+    JOIN tags t ON it.tag_id = t.id
+    """)
+    tag_map: Dict[str, List[Dict[str, Any]]] = {}
+    for r in cursor.fetchall():
+        p = r["item_path"]
+        tag_map.setdefault(p, []).append({
+            "id": r["id"],
+            "name": r["name"],
+            "color": r["color"],
+            "type": r["tag_type"]
+        })
+
+    conn.close()
+
+    def build_nested_node(path: str, name: str, item_type: str, size_bytes: int,
+                          x: float, y: float, w: float, h: float, level: int = 1) -> Dict[str, Any]:
+        norm_p = path.rstrip("\\")
+        subfolders = folders_by_parent.get(norm_p, [])
+        child_files = files_by_folder.get(norm_p, [])
+
+        children_items = []
+        for sf in subfolders:
+            val = sf["size_bytes"]
+            if val > 0:
+                children_items.append({
+                    "id": sf["path"],
+                    "path": sf["path"],
+                    "name": sf["name"],
+                    "type": "folder",
+                    "value": val,
+                    "category": sf.get("category") or "Sin Categoría",
+                    "status": sf.get("status") or "Por Revisar",
+                    "owner": sf.get("owner") or "Alex",
+                    "subfolder_count": sf.get("subfolder_count", 0),
+                    "file_count": sf.get("file_count", 0),
+                    "tags": tag_map.get(sf["path"], [])
+                })
+
+        for cf in child_files:
+            val = cf["size_bytes"]
+            if val > 0:
+                children_items.append({
+                    "id": cf["path"],
+                    "path": cf["path"],
+                    "name": cf["name"],
+                    "folder_path": cf.get("folder_path", ""),
+                    "type": "file",
+                    "value": val,
+                    "extension": cf.get("extension", ""),
+                    "category": cf.get("category") or "Otros Archivos",
+                    "status": cf.get("status") or "Por Revisar",
+                    "owner": cf.get("owner") or "Alex",
+                    "mtime": cf.get("mtime", 0),
+                    "tags": tag_map.get(cf["path"], [])
+                })
+
+        can_subdivide = (level < max_nesting_depth and len(children_items) > 0 and w >= 45 and h >= 36)
+
+        node = {
+            "id": path,
+            "path": path,
+            "name": name,
+            "type": item_type,
+            "level": level,
+            "size_bytes": size_bytes,
+            "value": size_bytes,
+            "rect": {"x": round(x, 1), "y": round(y, 1), "w": round(w, 1), "h": round(h, 1)},
+            "is_container": can_subdivide,
+            "children": []
+        }
+
+        if can_subdivide:
+            header_h = 20 if level == 1 else (16 if level == 2 else 14)
+            pad = 3.5 if level == 1 else (2.5 if level == 2 else 1.5)
+            inner_x = x + pad
+            inner_y = y + header_h + pad
+            inner_w = max(0.0, w - 2 * pad)
+            inner_h = max(0.0, h - header_h - 2 * pad)
+
+            if inner_w >= 15 and inner_h >= 15:
+                layout_children = compute_squarified_treemap(children_items, inner_x, inner_y, inner_w, inner_h)
+                for c_lay in layout_children:
+                    cr = c_lay["rect"]
+                    child_node = build_nested_node(
+                        c_lay["path"], c_lay["name"], c_lay["type"], c_lay["value"],
+                        cr["x"], cr["y"], cr["w"], cr["h"], level=level + 1
+                    )
+                    child_node["category"] = c_lay.get("category", "Sin Categoría")
+                    child_node["status"] = c_lay.get("status", "Por Revisar")
+                    child_node["owner"] = c_lay.get("owner", "Alex")
+                    child_node["tags"] = c_lay.get("tags", [])
+                    if c_lay["type"] == "file":
+                        child_node["extension"] = c_lay.get("extension", "")
+                        child_node["mtime"] = c_lay.get("mtime", 0)
+                    node["children"].append(child_node)
+
+        return node
+
+    # Start from root or parent_path
+    if is_root:
+        root_children = folders_by_parent.get("E:", [])
+        if not root_children:
+            root_children = [f for f in folder_dict.values() if f.get("depth") == 1]
+    else:
+        root_children = folders_by_parent.get(norm_parent, [])
+
+    root_items = []
+    for f in root_children:
+        if f["size_bytes"] > 0:
+            root_items.append({
+                "id": f["path"],
+                "path": f["path"],
+                "name": f["name"],
+                "type": "folder",
+                "value": f["size_bytes"],
+                "category": f.get("category", "Sin Categoría"),
+                "status": f.get("status", "Por Revisar"),
+                "owner": f.get("owner", "Alex"),
+                "subfolder_count": f.get("subfolder_count", 0),
+                "file_count": f.get("file_count", 0),
+                "tags": tag_map.get(f["path"], [])
+            })
+
+    if not is_root:
+        for cf in files_by_folder.get(norm_parent, []):
+            if cf["size_bytes"] > 0:
+                root_items.append({
+                    "id": cf["path"],
+                    "path": cf["path"],
+                    "name": cf["name"],
+                    "type": "file",
+                    "value": cf["size_bytes"],
+                    "extension": cf.get("extension", ""),
+                    "category": cf.get("category", "Otros Archivos"),
+                    "status": cf.get("status", "Por Revisar"),
+                    "owner": cf.get("owner", "Alex"),
+                    "mtime": cf.get("mtime", 0),
+                    "tags": tag_map.get(cf["path"], [])
+                })
+
+    root_layout = compute_squarified_treemap(root_items, 0, 0, canvas_w, canvas_h)
+    nested_roots = []
+    total_bytes = 0
+
+    for r in root_layout:
+        rect = r["rect"]
+        n = build_nested_node(
+            r["path"], r["name"], r["type"], r["value"],
+            rect["x"], rect["y"], rect["w"], rect["h"], level=1
+        )
+        n["category"] = r.get("category", "Sin Categoría")
+        n["status"] = r.get("status", "Por Revisar")
+        n["owner"] = r.get("owner", "Alex")
+        n["tags"] = r.get("tags", [])
+        if r["type"] == "file":
+            n["extension"] = r.get("extension", "")
+        nested_roots.append(n)
+        total_bytes += r["value"]
+
+    return {
+        "parent_path": parent_path,
+        "view_mode": "nested",
+        "canvas_w": canvas_w,
+        "canvas_h": canvas_h,
+        "total_items": len(nested_roots),
+        "total_bytes": total_bytes,
+        "nodes": nested_roots
+    }
+
 def get_folder_treemap(parent_path: str = "E:\\", canvas_w: float = 1200, canvas_h: float = 700, 
-                       view_mode: str = "both", top_files_limit: int = 150) -> Dict[str, Any]:
+                       view_mode: str = "nested", top_files_limit: int = 150) -> Dict[str, Any]:
     """
     Returns Treemap blocks supporting:
-    - view_mode = 'folders' (Folders only)
+    - view_mode = 'nested' or 'both' (Genuine FolderSizes Nested Treemap with Subdivisions & Graded Gray Borders)
     - view_mode = 'files' (Top largest files directly)
-    - view_mode = 'both' (Subfolders + child/top files)
+    - view_mode = 'folders' (Folders only single-level)
     """
+    if view_mode in ["nested", "both"]:
+        return get_nested_treemap(parent_path=parent_path, canvas_w=canvas_w, canvas_h=canvas_h)
+
     conn = get_connection()
     cursor = conn.cursor()
 
