@@ -1,0 +1,14 @@
+# Ignore heavy binaries and local database
+*.exe
+*.zip
+*.rar
+*.iso
+*.db
+*.db-wal
+*.db-shm
+.cache/
+thumbnails/
+__pycache__/
+*.py[cod]
+*.log
+.git
