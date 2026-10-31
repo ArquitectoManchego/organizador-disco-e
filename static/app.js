@@ -6,7 +6,7 @@
 window.API_BASE = localStorage.getItem('organizador_api_base') || (
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
     ? '' 
-    : 'https://springfield-hull-miscellaneous-individuals.trycloudflare.com'
+    : 'https://ipaq-sections-lifestyle-truck.trycloudflare.com'
 );
 
 let cachedSnapshot = null;

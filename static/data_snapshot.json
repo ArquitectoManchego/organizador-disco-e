@@ -57093,16 +57093,16 @@
       },
       {
         "name": "1 a 3 años",
-        "count": 19543,
-        "bytes": 244377565684,
+        "count": 19539,
+        "bytes": 244348970850,
         "color": "#f97316",
         "percentage_bytes": 16.51,
         "percentage_count": 6.5
       },
       {
         "name": "Antiguos (> 3 años)",
-        "count": 280734,
-        "bytes": 1148637617700,
+        "count": 280738,
+        "bytes": 1148666212534,
         "color": "#64748b",
         "percentage_bytes": 77.59,
         "percentage_count": 93.4
@@ -58042,6 +58042,11 @@
     "total_exact_found": 18,
     "total_near_found": 4
   },
+  "recycle_bin": {
+    "items": [],
+    "total_files": 0,
+    "total_bytes": 0
+  },
   "explore_cache": {
     "E:\\": {
       "current_folder": {
@@ -58393,7 +58398,7 @@
           "status": "Organizado",
           "owner": "Alex",
           "notes": "",
-          "indexed_at": 1793401283.5745857,
+          "indexed_at": 1793459118.113572,
           "tags": []
         }
       ],
