@@ -78,6 +78,8 @@ window.fetch = async function(url, options = {}) {
         return new Response(JSON.stringify(snap.tag_space), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/compare/drive-duplicates')) {
         return new Response(JSON.stringify(snap.drive_duplicates), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/recycle-bin')) {
+        return new Response(JSON.stringify(snap.recycle_bin || { items: [], total_files: 0, total_bytes: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/explore')) {
         const u = new URL(url, 'http://localhost');
         const p = u.searchParams.get('path') || 'E:\\';
@@ -947,7 +949,7 @@ function setMainModule(moduleName) {
   }
 
   // Update desktop tab buttons
-  ['explorer', 'foldersizes', 'comparator', 'thumbnails'].forEach(m => {
+  ['explorer', 'foldersizes', 'comparator', 'thumbnails', 'recycle-bin'].forEach(m => {
     const btn = document.getElementById(`tab-nav-${m}`);
     if (btn) {
       const isTarget = (m === moduleName);
@@ -972,6 +974,7 @@ function setMainModule(moduleName) {
   const fsWrapper = document.getElementById('foldersizes-view-wrapper');
   const cmpWrapper = document.getElementById('comparator-view-wrapper');
   const tsWrapper = document.getElementById('thumbnails-view-wrapper');
+  const rbWrapper = document.getElementById('recycle-bin-view-wrapper');
 
   // Hide all
   if (expWrapper) expWrapper.classList.add('hidden');
@@ -979,6 +982,7 @@ function setMainModule(moduleName) {
   if (fsWrapper) fsWrapper.classList.add('hidden');
   if (cmpWrapper) cmpWrapper.classList.add('hidden');
   if (tsWrapper) tsWrapper.classList.add('hidden');
+  if (rbWrapper) rbWrapper.classList.add('hidden');
 
   if (moduleName === 'explorer') {
     if (state.currentView === 'organigram') {
@@ -1009,9 +1013,125 @@ function setMainModule(moduleName) {
     if (!window.thumbnailsStudioInstance) {
       window.thumbnailsStudioInstance = new ThumbnailsStudio('thumbnails-container');
     }
+  } else if (moduleName === 'recycle-bin') {
+    if (rbWrapper) rbWrapper.classList.remove('hidden');
+    loadRecycleBin();
   }
 
   if (window.lucide) lucide.createIcons();
+}
+
+// ==========================================
+// SWIPEDRIVE: RECYCLE BIN CONTROLLER
+// ==========================================
+let cachedRecycleBinItems = [];
+
+async function loadRecycleBin() {
+  const loading = document.getElementById('view-loading');
+  if (loading) loading.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/recycle-bin');
+    if (!res.ok) throw new Error("No se pudo cargar la papelera");
+    const data = await res.json();
+    cachedRecycleBinItems = data.items || [];
+
+    const countEl = document.getElementById('rb-total-files');
+    if (countEl) countEl.innerText = `${data.total_files || 0} archivos`;
+
+    const bytesEl = document.getElementById('rb-total-bytes');
+    if (bytesEl) bytesEl.innerText = formatBytes(data.total_bytes || 0);
+
+    renderRecycleBinTable(cachedRecycleBinItems);
+  } catch (e) {
+    showToast("Error al cargar papelera: " + e.message, "error");
+  } finally {
+    if (loading) loading.classList.add('hidden');
+  }
+}
+
+function renderRecycleBinTable(items) {
+  const tbody = document.getElementById('rb-table-body');
+  if (!tbody) return;
+
+  if (!items || items.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="p-12 text-center">
+          <div class="flex flex-col items-center justify-center space-y-3">
+            <div class="w-12 h-12 rounded-2xl bg-slate-800 text-slate-500 flex items-center justify-center">
+              <i data-lucide="trash" class="w-6 h-6"></i>
+            </div>
+            <p class="text-xs font-semibold text-slate-300">La papelera de SwipeDrive está vacía</p>
+            <p class="text-[11px] text-slate-500 max-w-sm">
+              Cuando uses el Modo Depuración en SwipeDrive para enviar archivos a la papelera, aparecerán listados aquí.
+            </p>
+          </div>
+        </td>
+      </tr>
+    `;
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  tbody.innerHTML = items.map(item => `
+    <tr class="hover:bg-slate-800/40 transition">
+      <td class="p-3">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="${getFileIcon(item.extension)}" class="w-4 h-4 text-slate-400 flex-shrink-0"></i>
+          <span class="font-medium text-slate-200 truncate max-w-xs">${item.name}</span>
+        </div>
+      </td>
+      <td class="p-3 text-slate-400 font-mono text-[11px] truncate max-w-xs" title="${item.original_folder || ''}">
+        ${item.original_folder || '-'}
+      </td>
+      <td class="p-3 font-mono text-slate-300">
+        ${formatBytes(item.size_bytes)}
+      </td>
+      <td class="p-3 text-slate-400 text-[11px]">
+        ${formatDate(item.deleted_at)}
+      </td>
+      <td class="p-3 text-right">
+        <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <i data-lucide="check" class="w-3 h-3"></i>
+          <span>En Papelera Windows</span>
+        </span>
+      </td>
+    </tr>
+  `).join('');
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function filterRecycleBinTable(query) {
+  if (!query) {
+    renderRecycleBinTable(cachedRecycleBinItems);
+    return;
+  }
+  const q = query.toLowerCase();
+  const filtered = cachedRecycleBinItems.filter(i => 
+    (i.name && i.name.toLowerCase().includes(q)) || 
+    (i.original_folder && i.original_folder.toLowerCase().includes(q))
+  );
+  renderRecycleBinTable(filtered);
+}
+
+async function confirmClearRecycleBinHistory() {
+  if (!confirm("¿Deseas vaciar el historial de registro de SwipeDrive? Nota: Los archivos seguirán seguros en la Papelera de Windows.")) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/recycle-bin/clear-history', { method: 'POST' });
+    if (res.ok) {
+      showToast("Historial de la papelera vaciado", "success");
+      loadRecycleBin();
+    } else {
+      throw new Error("Error en servidor");
+    }
+  } catch (e) {
+    showToast("Error al vaciar historial: " + e.message, "error");
+  }
 }
 
 // View switcher within Explorer module (Grid, Organigram, List)

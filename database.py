@@ -83,6 +83,21 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_tags_path ON item_tags(item_path);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_tags_tag ON item_tags(tag_id);")
 
+    # App Recycle Bin table (Index of items sent to recycle bin through our app)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS app_recycle_bin (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        original_folder TEXT NOT NULL,
+        size_bytes INTEGER DEFAULT 0,
+        extension TEXT DEFAULT '',
+        deleted_at REAL NOT NULL,
+        restored INTEGER DEFAULT 0
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bin_deleted_at ON app_recycle_bin(deleted_at);")
+
     # Seed default tags
     default_tags = [
         # Categorías principales

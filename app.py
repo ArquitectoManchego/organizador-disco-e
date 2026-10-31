@@ -1,6 +1,10 @@
 import os
 import sys
+import time
 import subprocess
+import shutil
+import ctypes
+from ctypes import wintypes
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
@@ -8,7 +12,6 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import shutil
 
 from database import get_connection, init_db
 from thumbnails import get_or_create_thumbnail
@@ -17,7 +20,45 @@ import foldersizes_engine
 import compare_engine
 from thumbnails_studio import studio_manager
 
-app = FastAPI(title="Organizador de Disco E:", version="1.0.0")
+# Windows Shell Recycle Bin structure (SHFileOperationW)
+class SHFILEOPSTRUCTW(ctypes.Structure):
+    _fields_ = [
+        ('hwnd', wintypes.HWND),
+        ('wFunc', wintypes.UINT),
+        ('pFrom', wintypes.LPCWSTR),
+        ('pTo', wintypes.LPCWSTR),
+        ('fFlags', wintypes.WORD),
+        ('fAnyOperationsAborted', wintypes.BOOL),
+        ('hNameMappings', wintypes.LPVOID),
+        ('lpszProgressTitle', wintypes.LPCWSTR)
+    ]
+
+FO_DELETE = 3
+FOF_ALLOWUNDO = 0x0040
+FOF_NOCONFIRMATION = 0x0010
+FOF_SILENT = 0x0004
+
+def send_to_recycle_bin(path_str: str) -> bool:
+    """Sends file to Windows Recycle Bin with undo capability, avoiding permanent deletion."""
+    try:
+        abs_p = os.path.abspath(path_str) + '\0\0'
+        op = SHFILEOPSTRUCTW(
+            hwnd=None,
+            wFunc=FO_DELETE,
+            pFrom=abs_p,
+            pTo=None,
+            fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT,
+            fAnyOperationsAborted=False,
+            hNameMappings=None,
+            lpszProgressTitle=None
+        )
+        res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        return (res == 0)
+    except Exception as e:
+        print(f"Error in send_to_recycle_bin: {e}")
+        return False
+
+app = FastAPI(title="SwipeDrive", version="2.0.0")
 
 # Enable CORS
 app.add_middleware(
@@ -438,6 +479,207 @@ def open_in_explorer(req: OpenInExplorerRequest):
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
+# SWIPEDRIVE: TINDER SWIPE & RECYCLE BIN
+# ==========================================
+
+class RecycleFileRequest(BaseModel):
+    path: str
+
+@app.post("/api/files/recycle")
+def recycle_file_endpoint(req: RecycleFileRequest):
+    """
+    Sends file to Windows Recycle Bin (NOT permanent deletion)
+    and records an index entry in app_recycle_bin.
+    """
+    p = Path(req.path)
+    if not p.exists() or p.is_dir():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    try:
+        stat = p.stat()
+        file_size = stat.st_size
+        file_name = p.name
+        ext = p.suffix.lower()
+        original_folder = str(p.parent)
+
+        # 1. Send to Windows Recycle Bin
+        success = send_to_recycle_bin(str(p))
+        if not success:
+            raise HTTPException(status_code=500, detail="No se pudo enviar el archivo a la papelera de Windows")
+
+        # 2. Record index entry in SQLite
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT INTO app_recycle_bin (path, name, original_folder, size_bytes, extension, deleted_at, restored)
+        VALUES (?, ?, ?, ?, ?, ?, 0);
+        """, (str(p), file_name, original_folder, file_size, ext, time.time()))
+
+        # 3. Remove from active files & item_tags
+        cursor.execute("DELETE FROM files WHERE path = ?;", (str(p),))
+        cursor.execute("DELETE FROM item_tags WHERE item_path = ? AND item_type = 'file';", (str(p),))
+
+        # 4. Decrement folder file count and size if present
+        cursor.execute("""
+        UPDATE folders 
+        SET file_count = MAX(0, file_count - 1),
+            size_bytes = MAX(0, size_bytes - ?)
+        WHERE path = ?;
+        """, (file_size, original_folder))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "name": file_name,
+            "path": str(p),
+            "size_bytes": file_size
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/recycle-bin")
+def get_recycle_bin_endpoint():
+    """Returns the index of all files sent to recycle bin through SwipeDrive."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT id, path, name, original_folder, size_bytes, extension, deleted_at, restored
+    FROM app_recycle_bin
+    ORDER BY deleted_at DESC
+    LIMIT 200;
+    """)
+    items = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM app_recycle_bin WHERE restored = 0;")
+    tot_count, tot_bytes = cursor.fetchone()
+
+    conn.close()
+    return {
+        "items": items,
+        "total_files": tot_count,
+        "total_bytes": tot_bytes
+    }
+
+@app.post("/api/recycle-bin/clear-history")
+def clear_recycle_bin_history():
+    """Clears our app's recycle bin index (does not affect Windows Recycle Bin)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM app_recycle_bin;")
+    conn.commit()
+    conn.close()
+    return {"success": True}
+
+class MoveFileRequest(BaseModel):
+    src_path: str
+    dest_folder: str
+
+@app.post("/api/files/move")
+def move_file_endpoint(req: MoveFileRequest):
+    """
+    Moves a file to a destination folder and updates its record in SQLite.
+    """
+    src = Path(req.src_path)
+    if not src.exists() or src.is_dir():
+        raise HTTPException(status_code=404, detail="Archivo de origen no existe")
+
+    dest_dir = Path(req.dest_folder)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    target_file = dest_dir / src.name
+    # Handle name collision
+    counter = 1
+    while target_file.exists() and target_file != src:
+        target_file = dest_dir / f"{src.stem}_{counter}{src.suffix}"
+        counter += 1
+
+    try:
+        shutil.move(str(src), str(target_file))
+
+        # Update SQLite records
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+        UPDATE files 
+        SET path = ?, folder_path = ?
+        WHERE path = ?;
+        """, (str(target_file), str(dest_dir), str(src)))
+
+        cursor.execute("""
+        UPDATE item_tags
+        SET item_path = ?
+        WHERE item_path = ? AND item_type = 'file';
+        """, (str(target_file), str(src)))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "old_path": str(src),
+            "new_path": str(target_file),
+            "name": target_file.name,
+            "dest_folder": str(dest_dir)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al mover archivo: {e}")
+
+class TagFileRequest(BaseModel):
+    path: str
+    tag_id: int
+
+@app.post("/api/files/tag")
+def tag_file_endpoint(req: TagFileRequest):
+    """Applies a tag to a file."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT OR IGNORE INTO item_tags (item_path, item_type, tag_id)
+    VALUES (?, 'file', ?);
+    """, (req.path, req.tag_id))
+
+    cursor.execute("""
+    SELECT t.id, t.name, t.color, t.tag_type, t.icon
+    FROM item_tags it
+    JOIN tags t ON it.tag_id = t.id
+    WHERE it.item_path = ? AND it.item_type = 'file';
+    """, (req.path,))
+    tags = [dict(r) for r in cursor.fetchall()]
+
+    conn.commit()
+    conn.close()
+    return {"success": True, "tags": tags}
+
+@app.get("/api/folders/picker")
+def get_folders_picker(search: Optional[str] = None):
+    """Returns search or top folders for the Move setup picker."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if search:
+        cursor.execute("""
+        SELECT path, name, depth, size_bytes, file_count, category
+        FROM folders
+        WHERE name LIKE ? OR path LIKE ?
+        ORDER BY depth ASC, name ASC
+        LIMIT 30;
+        """, (f"%{search}%", f"%{search}%"))
+    else:
+        cursor.execute("""
+        SELECT path, name, depth, size_bytes, file_count, category
+        FROM folders
+        WHERE depth <= 2
+        ORDER BY depth ASC, size_bytes DESC
+        LIMIT 40;
+        """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return {"folders": rows}
 
 @app.post("/api/auto-categorize")
 def trigger_auto_categorize():

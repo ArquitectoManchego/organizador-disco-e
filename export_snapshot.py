@@ -175,6 +175,22 @@ def export_all():
             "total_files": len(files)
         }
 
+    # 7. Recycle bin items
+    cursor.execute("""
+    SELECT id, path, name, original_folder, size_bytes, extension, deleted_at, restored
+    FROM app_recycle_bin
+    ORDER BY deleted_at DESC
+    LIMIT 200;
+    """)
+    rb_items = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM app_recycle_bin WHERE restored = 0;")
+    rb_count, rb_bytes = cursor.fetchone()
+    recycle_bin_data = {
+        "items": rb_items,
+        "total_files": rb_count,
+        "total_bytes": rb_bytes
+    }
+
     conn.close()
 
     snapshot = {
@@ -186,6 +202,7 @@ def export_all():
         "files_analysis": files_analysis,
         "tag_space": tag_space,
         "drive_duplicates": drive_dupes,
+        "recycle_bin": recycle_bin_data,
         "explore_cache": explored_cache
     }
 

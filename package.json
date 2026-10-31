@@ -1,0 +1,9 @@
+{
+  "name": "swipedrive",
+  "version": "2.0.0",
+  "description": "SwipeDrive - Organizador y Gestor Inteligente de Almacenamiento Local y Externo",
+  "scripts": {
+    "dev": "python -m uvicorn app:app --host 127.0.0.1 --port 3032",
+    "start": "python -m uvicorn app:app --host 127.0.0.1 --port 3032"
+  }
+}

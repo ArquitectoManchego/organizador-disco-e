@@ -114,3 +114,48 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ====================================================
+   SWIPEDRIVE: TINDER SWIPE STYLES & ACCELERATED PHYSICS
+   ==================================================== */
+.tinder-viewport {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tinder-card {
+  will-change: transform, opacity;
+  transform-origin: 50% 100%;
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 0 20px rgba(99, 102, 241, 0.15);
+}
+
+.tinder-card.card-under {
+  transform: scale(0.93) translateY(14px);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s ease;
+}
+
+.tinder-stamp {
+  font-family: var(--font-sans);
+  letter-spacing: 0.1em;
+  font-weight: 900;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.edge-glow {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+/* Tap zone feedback */
+.tap-zone-hint {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.tap-zone-hint:active {
+  opacity: 0.3;
+}
+
