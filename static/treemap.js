@@ -47,13 +47,16 @@ class FolderSizesTreemap {
             <!-- Mode switch buttons -->
             <div class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs overflow-x-auto">
               <button id="fs-mode-both" class="px-2.5 py-1 rounded-lg font-semibold bg-indigo-600 text-white transition flex items-center space-x-1">
-                <span>🗂️ Carpetas y Archivos</span>
+                <span>🗂️ Treemap Jerárquico</span>
+              </button>
+              <button id="fs-mode-sunburst" class="px-2.5 py-1 rounded-lg font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1">
+                <span>☀️ Radial Sunburst</span>
               </button>
               <button id="fs-mode-files" class="px-2.5 py-1 rounded-lg font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1">
-                <span>📄 Archivos Más Pesados</span>
+                <span>📄 Más Pesados</span>
               </button>
               <button id="fs-mode-reports" class="px-2.5 py-1 rounded-lg font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1">
-                <span>📊 Reportes de Archivos</span>
+                <span>📊 Reportes Pro (Vacías, Basura...)</span>
               </button>
               <button id="fs-mode-tags" class="px-2.5 py-1 rounded-lg font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1">
                 <span>🏷️ Etiquetas</span>
@@ -72,7 +75,7 @@ class FolderSizesTreemap {
             <!-- Remote Scan Button -->
             <button onclick="triggerRemoteFileAnalysis()" class="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition" title="Pedir a la PC que analice archivos en vivo">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-              <span class="hidden md:inline">Analizar Archivos en PC</span>
+              <span class="hidden md:inline">Analizar en PC</span>
             </button>
 
             <!-- Search box -->
@@ -87,7 +90,7 @@ class FolderSizesTreemap {
         <!-- Treemap Canvas & Reports Area -->
         <div class="flex-1 relative overflow-hidden p-3" id="fs-canvas-wrapper">
           <div id="fs-canvas-container" class="w-full h-full relative rounded-xl overflow-hidden border border-slate-800/80 bg-slate-900/40 overflow-y-auto">
-            <!-- Dynamic Tiles or Reports Injected Here -->
+            <!-- Dynamic Tiles, Sunburst or Reports Injected Here -->
           </div>
 
           <!-- Floating Info Card Tooltip -->
@@ -117,6 +120,7 @@ class FolderSizesTreemap {
 
   attachEvents() {
     const btnBoth = document.getElementById('fs-mode-both');
+    const btnSunburst = document.getElementById('fs-mode-sunburst');
     const btnFiles = document.getElementById('fs-mode-files');
     const btnReports = document.getElementById('fs-mode-reports');
     const btnTags = document.getElementById('fs-mode-tags');
@@ -126,7 +130,8 @@ class FolderSizesTreemap {
     const btnUp = document.getElementById('fs-btn-up');
 
     const setModeActive = (activeBtn) => {
-      [btnBoth, btnFiles, btnReports, btnTags].forEach(b => {
+      [btnBoth, btnSunburst, btnFiles, btnReports, btnTags].forEach(b => {
+        if (!b) return;
         b.classList.remove('bg-indigo-600', 'text-white');
         b.classList.add('text-slate-400');
       });
@@ -139,6 +144,13 @@ class FolderSizesTreemap {
       setModeActive(btnBoth);
       colorBox.classList.remove('hidden');
       this.loadTreemap(this.currentPath, "both");
+    };
+
+    btnSunburst.onclick = () => {
+      this.currentMode = "sunburst";
+      setModeActive(btnSunburst);
+      colorBox.classList.add('hidden');
+      this.loadSunburst();
     };
 
     btnFiles.onclick = () => {
@@ -207,8 +219,22 @@ class FolderSizesTreemap {
     }
   }
 
+  async loadSunburst() {
+    this.currentMode = "sunburst";
+    const container = document.getElementById('fs-canvas-container');
+    if (container) container.innerHTML = '<div class="p-8 text-center text-slate-400">Generando gráfico radial Sunburst...</div>';
+    try {
+      const res = await fetch(`/api/foldersizes/sunburst?root=${encodeURIComponent(this.currentPath)}&max_depth=3`);
+      this.sunburstData = await res.json();
+      this.render();
+    } catch (e) {
+      console.error("Error loading sunburst", e);
+    }
+  }
+
   async loadFilesAnalysis() {
     this.currentMode = "reports";
+    if (!this.activeReportTab) this.activeReportTab = 'largest';
     try {
       const res = await fetch(`/api/foldersizes/files-analysis?limit=150`);
       this.filesAnalysisData = await res.json();
@@ -260,10 +286,121 @@ class FolderSizesTreemap {
       this.renderFilesAnalysisReports(container);
     } else if (this.currentMode === 'tags') {
       this.renderTagTreemap(container);
+    } else if (this.currentMode === 'sunburst') {
+      this.renderSunburst(container);
     } else {
       this.renderTreemapNodes(container);
     }
     if (window.lucide) lucide.createIcons();
+  }
+
+  renderSunburst(container) {
+    const root = (this.sunburstData && this.sunburstData.root) ? this.sunburstData.root : this.sunburstData;
+    if (!root || !root.children) {
+      container.innerHTML = '<div class="p-8 text-center text-slate-400">No hay datos para Sunburst.</div>';
+      return;
+    }
+    const w = container.clientWidth || 900;
+    const h = container.clientHeight || 600;
+    const cx = w / 2;
+    const cy = h / 2;
+    const maxR = Math.min(w, h) / 2 - 30;
+    const ringWidth = Math.max(35, (maxR - 70) / 3);
+
+    const footerStats = document.getElementById('fs-footer-stats');
+    if (footerStats) {
+      footerStats.innerHTML = `
+        <span>☀️ Gráfico Radial Sunburst</span>
+        <span>•</span>
+        <span class="text-indigo-400">Total: ${formatBytes(root.value)}</span>
+        <span>•</span>
+        <span class="text-slate-400">Pasa el cursor sobre los anillos para inspeccionar</span>
+      `;
+    }
+
+    let svgHtml = `<svg width="${w}" height="${h}" class="mx-auto select-none">`;
+
+    // Center circle
+    svgHtml += `
+      <circle cx="${cx}" cy="${cy}" r="65" fill="#1e1b4b" stroke="#6366f1" stroke-width="2" class="cursor-pointer" onclick="window.folderSizesInstance.loadTreemap('${root.path.replace(/\\/g, '\\\\')}')"/>
+      <text x="${cx}" y="${cy - 8}" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="bold">${root.name.slice(0, 14)}</text>
+      <text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="#818cf8" font-size="10" font-family="monospace">${formatBytes(root.value)}</text>
+      <text x="${cx}" y="${cy + 26}" text-anchor="middle" fill="#94a3b8" font-size="9">(Centro)</text>
+    `;
+
+    // Recursive arc renderer
+    const drawArcs = (children, depth, startAngle, endAngle) => {
+      if (!children || children.length === 0 || depth > 3) return;
+      const totalVal = children.reduce((sum, c) => sum + (c.value || 0), 0) || 1;
+      let currentAngle = startAngle;
+
+      children.forEach(child => {
+        const span = (child.value / totalVal) * (endAngle - startAngle);
+        const a0 = currentAngle;
+        const a1 = currentAngle + span;
+        currentAngle += span;
+
+        if (span < 0.012) return;
+
+        const r0 = 70 + (depth - 1) * ringWidth;
+        const r1 = r0 + ringWidth - 2;
+
+        const x00 = cx + r0 * Math.cos(a0);
+        const y00 = cy + r0 * Math.sin(a0);
+        const x01 = cx + r1 * Math.cos(a0);
+        const y01 = cy + r1 * Math.sin(a0);
+        const x11 = cx + r1 * Math.cos(a1);
+        const y11 = cy + r1 * Math.sin(a1);
+        const x10 = cx + r0 * Math.cos(a1);
+        const y10 = cy + r0 * Math.sin(a1);
+
+        const largeArc = (span > Math.PI) ? 1 : 0;
+        const pathData = `M ${x00} ${y00} L ${x01} ${y01} A ${r1} ${r1} 0 ${largeArc} 1 ${x11} ${y11} L ${x10} ${y10} A ${r0} ${r0} 0 ${largeArc} 0 ${x00} ${y00} Z`;
+
+        const escPath = child.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const escName = child.name.replace(/'/g, "\\'");
+        svgHtml += `
+          <path d="${pathData}" fill="${child.color || '#6366f1'}" stroke="#0f172a" stroke-width="1.5" class="sunburst-arc" opacity="0.88"
+                onmouseover="window.folderSizesInstance.showSunburstTooltip(event, '${escName}', '${escPath}', ${child.value}, '${child.category}', ${child.file_count})"
+                onmousemove="window.folderSizesInstance.moveTooltip(event)"
+                onmouseout="window.folderSizesInstance.hideTooltip()"
+                onclick="window.folderSizesInstance.loadTreemap('${escPath}')" />
+        `;
+
+        if (span > 0.22 && depth <= 2) {
+          const midA = (a0 + a1) / 2;
+          const midR = (r0 + r1) / 2;
+          const lx = cx + midR * Math.cos(midA);
+          const ly = cy + midR * Math.sin(midA);
+          svgHtml += `<text x="${lx}" y="${ly + 3}" text-anchor="middle" fill="#ffffff" font-size="9" font-weight="bold" pointer-events="none">${child.name.slice(0, 10)}</text>`;
+        }
+
+        drawArcs(child.children, depth + 1, a0, a1);
+      });
+    };
+
+    drawArcs(root.children, 1, 0, 2 * Math.PI);
+    svgHtml += `</svg>`;
+    container.innerHTML = svgHtml;
+  }
+
+  showSunburstTooltip(e, name, path, value, category, fileCount) {
+    const tooltip = document.getElementById('fs-tooltip');
+    if (!tooltip) return;
+    tooltip.innerHTML = `
+      <div class="mb-1">
+        <h4 class="font-bold text-sm text-white truncate">${name}</h4>
+        <span class="text-[10px] text-slate-400 font-mono block truncate">${path}</span>
+      </div>
+      <div class="grid grid-cols-2 gap-1 text-[11px] font-mono border-t border-slate-800 pt-1.5 mt-1">
+        <div>Tamaño: <span class="text-emerald-400 font-bold">${formatBytes(value)}</span></div>
+        <div>Archivos: <span class="text-white font-bold">${fileCount ? fileCount.toLocaleString() : '-'}</span></div>
+        <div>Categoría: <span class="text-sky-300 font-bold">${category || '-'}</span></div>
+        <div>Acción: <span class="text-indigo-400 font-bold">Clic para explorar</span></div>
+      </div>
+    `;
+    tooltip.classList.remove('hidden');
+    this.moveTooltip(e);
   }
 
   renderTreemapNodes(container) {
@@ -482,7 +619,7 @@ class FolderSizesTreemap {
     const footerStats = document.getElementById('fs-footer-stats');
     if (footerStats) {
       footerStats.innerHTML = `
-        <span class="text-white font-bold">📊 Reporte de Archivos: ${d.total_files.toLocaleString()} archivos</span>
+        <span class="text-white font-bold">📊 Suite de Reportes FolderSizes</span>
         <span>•</span>
         <span class="text-emerald-400 font-bold">💾 ${totalGB} GB</span>
         <span>•</span>
@@ -491,7 +628,7 @@ class FolderSizesTreemap {
     }
 
     container.innerHTML = `
-      <div class="p-4 space-y-6 max-w-7xl mx-auto">
+      <div class="p-4 space-y-5 max-w-7xl mx-auto">
         
         <!-- Metrics Header Grid -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -517,123 +654,149 @@ class FolderSizesTreemap {
           </div>
         </div>
 
-        <!-- 1. TOP EXTENSIONES Y TIPOS DE ARCHIVO -->
-        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center space-x-2">
-              <i data-lucide="pie-chart" class="w-4 h-4 text-indigo-400"></i>
-              <h3 class="text-sm font-bold text-white">Distribución por Tipos y Extensiones de Archivos</h3>
-            </div>
-            <span class="text-xs text-slate-400 font-mono">Top formatos por volumen</span>
+        <!-- SPECIALIZED REPORT SUBTABS BAR -->
+        <div class="p-2 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center space-x-1 overflow-x-auto text-xs font-semibold">
+            <button onclick="window.folderSizesInstance.switchReportTab('largest')" id="fs-rpt-tab-largest" 
+                    class="px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 ${this.activeReportTab === 'largest' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}">
+              <span>📄 Más Pesados</span>
+            </button>
+            <button onclick="window.folderSizesInstance.switchReportTab('empty_folders')" id="fs-rpt-tab-empty" 
+                    class="px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 ${this.activeReportTab === 'empty_folders' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}">
+              <span>📁 Carpetas Vacías</span>
+            </button>
+            <button onclick="window.folderSizesInstance.switchReportTab('junk_files')" id="fs-rpt-tab-junk" 
+                    class="px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 ${this.activeReportTab === 'junk_files' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}">
+              <span>🗑️ Archivos Basura</span>
+            </button>
+            <button onclick="window.folderSizesInstance.switchReportTab('oldest_newest')" id="fs-rpt-tab-oldest" 
+                    class="px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 ${this.activeReportTab === 'oldest_newest' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}">
+              <span>⏳ Antiguos / Recientes</span>
+            </button>
+            <button onclick="window.folderSizesInstance.switchReportTab('long_paths')" id="fs-rpt-tab-paths" 
+                    class="px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 ${this.activeReportTab === 'long_paths' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}">
+              <span>📏 Rutas Largas (>240c)</span>
+            </button>
+            <button onclick="window.folderSizesInstance.switchReportTab('distribution')" id="fs-rpt-tab-dist" 
+                    class="px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 ${this.activeReportTab === 'distribution' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}">
+              <span>📊 Rangos & Profundidad</span>
+            </button>
           </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-1">
-            ${d.file_types.map(t => `
-              <div class="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
-                <div class="min-w-0 pr-2">
-                  <div class="flex items-center space-x-2">
-                    <span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-500/20 text-indigo-300">${t.extension}</span>
-                    <span class="text-[11px] text-slate-300 font-semibold truncate">${t.category}</span>
-                  </div>
-                  <div class="text-[10px] text-slate-400 font-mono mt-1">
-                    ${t.count.toLocaleString()} archivos • Promedio: ${formatBytes(t.avg_bytes)}
-                  </div>
-                </div>
-                <div class="text-right flex-shrink-0">
-                  <div class="text-xs font-bold text-white font-mono">${formatBytes(t.total_bytes)}</div>
-                  <span class="text-[10px] font-bold text-emerald-400 font-mono">${t.percentage}%</span>
-                </div>
+
+          <!-- Export Buttons -->
+          <div class="flex items-center space-x-1.5">
+            <button onclick="window.folderSizesInstance.downloadCSV()" 
+                    class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1 transition border border-slate-700" 
+                    title="Descargar reporte actual en formato CSV para Excel">
+              <i data-lucide="download" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>Exportar CSV</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- DYNAMIC REPORT CONTENT CONTAINER -->
+        <div id="fs-active-report-view">
+          ${this.renderActiveReportTabContent()}
+        </div>
+
+      </div>
+    `;
+  }
+
+  async switchReportTab(tab) {
+    this.activeReportTab = tab;
+    const viewContainer = document.getElementById('fs-active-report-view');
+    if (!viewContainer) return;
+    viewContainer.innerHTML = '<div class="p-8 text-center text-slate-400">Cargando reporte especializado...</div>';
+
+    // Update active tab button style
+    ['largest', 'empty_folders', 'junk_files', 'oldest_newest', 'long_paths', 'distribution'].forEach(t => {
+      const btn = document.getElementById(`fs-rpt-tab-${t === 'empty_folders' ? 'empty' : (t === 'junk_files' ? 'junk' : (t === 'oldest_newest' ? 'oldest' : (t === 'long_paths' ? 'paths' : (t === 'distribution' ? 'dist' : 'largest'))))}`);
+      if (btn) {
+        btn.classList.toggle('bg-indigo-600', t === tab);
+        btn.classList.toggle('text-white', t === tab);
+        btn.classList.toggle('shadow', t === tab);
+        btn.classList.toggle('text-slate-400', t !== tab);
+      }
+    });
+
+    // Fetch tab-specific data if needed
+    if (tab === 'empty_folders' && !this.emptyFoldersData) {
+      try {
+        const res = await fetch('/api/foldersizes/reports/empty-folders');
+        this.emptyFoldersData = await res.json();
+      } catch (e) {}
+    } else if (tab === 'junk_files' && !this.junkFilesData) {
+      try {
+        const res = await fetch('/api/foldersizes/reports/junk-files');
+        this.junkFilesData = await res.json();
+      } catch (e) {}
+    } else if (tab === 'oldest_newest' && !this.oldestFilesData) {
+      try {
+        const res = await fetch('/api/foldersizes/reports/oldest-files?limit=100');
+        this.oldestFilesData = await res.json();
+      } catch (e) {}
+    } else if (tab === 'long_paths' && !this.longPathsData) {
+      try {
+        const res = await fetch('/api/foldersizes/reports/long-paths?min_len=240');
+        this.longPathsData = await res.json();
+      } catch (e) {}
+    } else if (tab === 'distribution' && !this.depthAnalysisData) {
+      try {
+        const res = await fetch('/api/foldersizes/reports/depth-analysis?max_depth=6');
+        this.depthAnalysisData = await res.json();
+      } catch (e) {}
+    }
+
+    viewContainer.innerHTML = this.renderActiveReportTabContent();
+    if (window.lucide) lucide.createIcons();
+  }
+
+  renderActiveReportTabContent() {
+    const tab = this.activeReportTab || 'largest';
+    const d = this.filesAnalysisData || {};
+
+    if (tab === 'empty_folders') {
+      const data = this.emptyFoldersData || { total_empty_folders: 0, folders: [] };
+      return `
+        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-4">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-center space-x-2">
+              <div class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center font-bold">
+                <i data-lucide="folder-x" class="w-4 h-4"></i>
               </div>
-            `).join('')}
-          </div>
-        </div>
+              <div>
+                <h3 class="text-sm font-bold text-white">Carpetas Vacías Detectadas (${data.total_empty_folders})</h3>
+                <p class="text-[11px] text-slate-400">Carpetas con 0 archivos que generan desorden en el disco.</p>
+              </div>
+            </div>
 
-        <!-- 2. RANGOS DE TAMAÑO & ANTIGÜEDAD -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <!-- Size brackets -->
-          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <div class="flex items-center space-x-2 mb-3">
-              <i data-lucide="layers" class="w-4 h-4 text-amber-400"></i>
-              <h3 class="text-sm font-bold text-white">Distribución por Rangos de Tamaño</h3>
-            </div>
-            <div class="space-y-2">
-              ${d.size_brackets.map(b => `
-                <div class="space-y-1">
-                  <div class="flex justify-between text-xs font-mono">
-                    <span class="text-slate-300 font-semibold">${b.name}</span>
-                    <span class="text-white">${formatBytes(b.bytes)} <span class="text-slate-400">(${b.count.toLocaleString()} arch, ${b.percentage_bytes}%)</span></span>
-                  </div>
-                  <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden">
-                    <div class="h-full rounded-full" style="width: ${Math.max(b.percentage_bytes, 1)}%; background-color: ${b.color}"></div>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
+            <button onclick="window.folderSizesInstance.cleanupAllEmptyFolders()" class="px-3.5 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-bold transition flex items-center space-x-1.5">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>Limpiar Todas las Carpetas Vacías</span>
+            </button>
           </div>
 
-          <!-- Age brackets -->
-          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <div class="flex items-center space-x-2 mb-3">
-              <i data-lucide="clock" class="w-4 h-4 text-sky-400"></i>
-              <h3 class="text-sm font-bold text-white">Distribución por Fecha de Modificación</h3>
-            </div>
-            <div class="space-y-2">
-              ${d.age_brackets.map(b => `
-                <div class="space-y-1">
-                  <div class="flex justify-between text-xs font-mono">
-                    <span class="text-slate-300 font-semibold">${b.name}</span>
-                    <span class="text-white">${formatBytes(b.bytes)} <span class="text-slate-400">(${b.count.toLocaleString()} arch, ${b.percentage_bytes}%)</span></span>
-                  </div>
-                  <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden">
-                    <div class="h-full rounded-full" style="width: ${Math.max(b.percentage_bytes, 1)}%; background-color: ${b.color}"></div>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-
-        <!-- 3. TOP ARCHIVOS MÁS GRANDES (LARGEST FILES TABLE) -->
-        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center space-x-2">
-              <i data-lucide="flame" class="w-4 h-4 text-red-400"></i>
-              <h3 class="text-sm font-bold text-white">Archivos Más Grandes del Disco E: (Top 150)</h3>
-            </div>
-            <span class="text-xs text-slate-400 font-mono">Consumo individual de espacio</span>
-          </div>
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto max-h-96 pr-1">
             <table class="w-full text-left text-xs font-mono">
               <thead class="text-slate-400 bg-slate-950/80 uppercase text-[10px] border-b border-slate-800">
                 <tr>
-                  <th class="py-2 px-3">#</th>
-                  <th class="py-2 px-3">Nombre del Archivo</th>
-                  <th class="py-2 px-3">Tamaño</th>
-                  <th class="py-2 px-3">% Disco</th>
-                  <th class="py-2 px-3">Categoría</th>
-                  <th class="py-2 px-3">Carpeta Contenedora</th>
-                  <th class="py-2 px-3 text-right">Acciones</th>
+                  <th class="py-2 px-3">Carpeta</th>
+                  <th class="py-2 px-3">Ruta Completa</th>
+                  <th class="py-2 px-3">Nivel</th>
+                  <th class="py-2 px-3 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-slate-300">
-                ${d.largest_files.map((f, idx) => `
+                ${data.folders.map(f => `
                   <tr class="hover:bg-slate-800/40 transition">
-                    <td class="py-2 px-3 text-slate-500 font-bold">${idx + 1}</td>
-                    <td class="py-2 px-3">
-                      <div class="font-bold text-white truncate max-w-xs" title="${f.name}">${f.name}</div>
-                      ${f.tags && f.tags.length > 0 ? `
-                        <div class="flex flex-wrap gap-1 mt-0.5">
-                          ${f.tags.map(t => `<span class="px-1.5 py-0.2 rounded text-[9px]" style="background:${t.color}20;color:${t.color}">${t.name}</span>`).join('')}
-                        </div>
-                      ` : ''}
-                    </td>
-                    <td class="py-2 px-3 font-bold text-emerald-400">${formatBytes(f.size_bytes)}</td>
-                    <td class="py-2 px-3 text-indigo-300">${f.percentage}%</td>
-                    <td class="py-2 px-3 text-slate-300">${f.category}</td>
-                    <td class="py-2 px-3 text-slate-500 truncate max-w-xs" title="${f.folder_path}">${f.folder_path}</td>
+                    <td class="py-2 px-3 font-bold text-white">${f.name}</td>
+                    <td class="py-2 px-3 text-slate-400 truncate max-w-md font-mono" title="${f.path}">${f.path}</td>
+                    <td class="py-2 px-3 text-indigo-400 font-bold">${f.depth}</td>
                     <td class="py-2 px-3 text-right">
-                      <button onclick="previewMedia('${f.path.replace(/\\/g, '\\\\')}', '${f.extension}')" 
-                              class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-[10px] transition">
-                        Ver
+                      <button onclick="window.folderSizesInstance.cleanupSingleFolder('${f.path.replace(/\\/g, '\\\\')}')" 
+                              class="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/30 text-rose-400 text-[10px] transition font-sans font-bold">
+                        Eliminar
                       </button>
                     </td>
                   </tr>
@@ -642,10 +805,318 @@ class FolderSizesTreemap {
             </table>
           </div>
         </div>
+      `;
+    }
 
+    if (tab === 'junk_files') {
+      const data = this.junkFilesData || { total_junk_files: 0, total_junk_bytes: 0, categories_breakdown: {}, sample_files: [] };
+      return `
+        <div class="space-y-4">
+          <!-- Breakdown cards -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            ${Object.entries(data.categories_breakdown).map(([cat, info]) => `
+              <div class="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">${cat}</span>
+                <div class="text-base font-bold text-white font-mono mt-0.5">${formatBytes(info.bytes)}</div>
+                <span class="text-[10px] text-amber-400 font-mono">${info.count.toLocaleString()} archivos</span>
+              </div>
+            `).join('')}
+          </div>
+
+          <!-- Junk Table -->
+          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h3 class="text-sm font-bold text-white">Archivos Temporales y Cachés Detectados (${data.total_junk_files.toLocaleString()} archivos • ${formatBytes(data.total_junk_bytes)})</h3>
+                <span class="text-[11px] text-slate-400">Archivos huérfanos .tmp, Thumbs.db, respaldos .bak y archivos de volcado.</span>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto max-h-96 pr-1">
+              <table class="w-full text-left text-xs font-mono">
+                <thead class="text-slate-400 bg-slate-950/80 uppercase text-[10px] border-b border-slate-800">
+                  <tr>
+                    <th class="py-2 px-3">Archivo</th>
+                    <th class="py-2 px-3">Extensión</th>
+                    <th class="py-2 px-3">Tamaño</th>
+                    <th class="py-2 px-3">Ubicación</th>
+                    <th class="py-2 px-3 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 text-slate-300">
+                  ${data.sample_files.map(f => `
+                    <tr class="hover:bg-slate-800/40 transition">
+                      <td class="py-2 px-3 font-bold text-white">${f.name}</td>
+                      <td class="py-2 px-3 text-indigo-400 font-bold">${f.extension}</td>
+                      <td class="py-2 px-3 text-emerald-400 font-bold">${formatBytes(f.size_bytes)}</td>
+                      <td class="py-2 px-3 text-slate-400 truncate max-w-sm" title="${f.folder_path}">${f.folder_path}</td>
+                      <td class="py-2 px-3 text-right">
+                        <button onclick="window.folderSizesInstance.recycleSingleFile('${f.path.replace(/\\/g, '\\\\')}')" 
+                                class="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/30 text-rose-400 text-[10px] transition font-sans font-bold">
+                          A Papelera
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (tab === 'oldest_newest') {
+      const data = this.oldestFilesData || { files: [] };
+      return `
+        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-4">
+          <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center font-bold">
+              <i data-lucide="clock" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Archivos Más Antiguos del Disco E: (Top 100)</h3>
+              <p class="text-[11px] text-slate-400">Archivos que llevan más años sin modificarse (candidatos ideales a respaldar o archivar).</p>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto max-h-96 pr-1">
+            <table class="w-full text-left text-xs font-mono">
+              <thead class="text-slate-400 bg-slate-950/80 uppercase text-[10px] border-b border-slate-800">
+                <tr>
+                  <th class="py-2 px-3">Archivo</th>
+                  <th class="py-2 px-3">Antigüedad</th>
+                  <th class="py-2 px-3">Fecha Modificación</th>
+                  <th class="py-2 px-3">Tamaño</th>
+                  <th class="py-2 px-3">Carpeta</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60 text-slate-300">
+                ${data.files.map(f => `
+                  <tr class="hover:bg-slate-800/40 transition">
+                    <td class="py-2 px-3 font-bold text-white truncate max-w-xs" title="${f.name}">${f.name}</td>
+                    <td class="py-2 px-3">
+                      <span class="px-2 py-0.5 rounded font-bold ${f.age_years >= 5 ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-300'}">${f.age_years} años</span>
+                    </td>
+                    <td class="py-2 px-3 text-slate-400">${new Date(f.mtime * 1000).toLocaleDateString()}</td>
+                    <td class="py-2 px-3 font-bold text-emerald-400">${formatBytes(f.size_bytes)}</td>
+                    <td class="py-2 px-3 text-slate-500 truncate max-w-xs" title="${f.folder_path}">${f.folder_path}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    if (tab === 'long_paths') {
+      const data = this.longPathsData || { min_length_checked: 240, files: [], folders: [] };
+      return `
+        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-4">
+          <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold">
+              <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Rutas Excesivamente Largas (> 240 caracteres)</h3>
+              <p class="text-[11px] text-slate-400">Riesgo de error en Windows (MAX_PATH limit de 260 caracteres).</p>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto max-h-96 pr-1">
+            <table class="w-full text-left text-xs font-mono">
+              <thead class="text-slate-400 bg-slate-950/80 uppercase text-[10px] border-b border-slate-800">
+                <tr>
+                  <th class="py-2 px-3">Longitud</th>
+                  <th class="py-2 px-3">Nombre</th>
+                  <th class="py-2 px-3">Ruta Completa</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60 text-slate-300">
+                ${data.files.map(f => `
+                  <tr class="hover:bg-slate-800/40 transition">
+                    <td class="py-2 px-3">
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold ${f.path_length >= 260 ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'bg-amber-500/20 text-amber-300'}">${f.path_length} car.</span>
+                    </td>
+                    <td class="py-2 px-3 font-bold text-white truncate max-w-xs" title="${f.name}">${f.name}</td>
+                    <td class="py-2 px-3 text-slate-400 truncate max-w-lg font-mono text-[10px]" title="${f.path}">${f.path}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    if (tab === 'distribution') {
+      const data = this.depthAnalysisData || { levels: [] };
+      return `
+        <div class="space-y-4">
+          <!-- Size brackets -->
+          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+            <h3 class="text-sm font-bold text-white mb-3 flex items-center space-x-2">
+              <i data-lucide="layers" class="w-4 h-4 text-amber-400"></i>
+              <span>Distribución por Rangos de Tamaño</span>
+            </h3>
+            <div class="space-y-2.5">
+              ${(d.size_brackets || []).map(b => `
+                <div class="space-y-1">
+                  <div class="flex justify-between text-xs font-mono">
+                    <span class="text-slate-300 font-semibold">${b.name}</span>
+                    <span class="text-white">${formatBytes(b.bytes)} <span class="text-slate-400">(${b.count.toLocaleString()} arch, ${b.percentage_bytes}%)</span></span>
+                  </div>
+                  <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden">
+                    <div class="h-full rounded-full" style="width: ${Math.max(b.percentage_bytes, 1)}%; background-color: ${b.color}"></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Depth levels -->
+          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+            <h3 class="text-sm font-bold text-white mb-3 flex items-center space-x-2">
+              <i data-lucide="git-branch" class="w-4 h-4 text-indigo-400"></i>
+              <span>Análisis de Profundidad de Carpetas (Folder Depth)</span>
+            </h3>
+            <div class="space-y-2.5">
+              ${data.levels.map(l => `
+                <div class="space-y-1">
+                  <div class="flex justify-between text-xs font-mono">
+                    <span class="text-indigo-300 font-bold">${l.label} (${l.folder_count} carpetas, ${l.total_files.toLocaleString()} archivos)</span>
+                    <span class="text-white font-bold">${formatBytes(l.total_bytes)} <span class="text-slate-400">(${l.percentage}%)</span></span>
+                  </div>
+                  <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden">
+                    <div class="h-full bg-indigo-500 rounded-full" style="width: ${Math.max(l.percentage, 1)}%"></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Default: 'largest' (Top 150 Largest Files)
+    return `
+      <!-- TOP ARCHIVOS MÁS GRANDES (LARGEST FILES TABLE) -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="flame" class="w-4 h-4 text-red-400"></i>
+            <h3 class="text-sm font-bold text-white">Archivos Más Grandes del Disco E: (Top 150)</h3>
+          </div>
+          <span class="text-xs text-slate-400 font-mono">Consumo individual de espacio</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs font-mono">
+            <thead class="text-slate-400 bg-slate-950/80 uppercase text-[10px] border-b border-slate-800">
+              <tr>
+                <th class="py-2 px-3">#</th>
+                <th class="py-2 px-3">Nombre del Archivo</th>
+                <th class="py-2 px-3">Tamaño</th>
+                <th class="py-2 px-3">% Disco</th>
+                <th class="py-2 px-3">Categoría</th>
+                <th class="py-2 px-3">Carpeta Contenedora</th>
+                <th class="py-2 px-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 text-slate-300">
+              ${(d.largest_files || []).map((f, idx) => `
+                <tr class="hover:bg-slate-800/40 transition">
+                  <td class="py-2 px-3 text-slate-500 font-bold">${idx + 1}</td>
+                  <td class="py-2 px-3">
+                    <div class="font-bold text-white truncate max-w-xs" title="${f.name}">${f.name}</div>
+                  </td>
+                  <td class="py-2 px-3 font-bold text-emerald-400">${formatBytes(f.size_bytes)}</td>
+                  <td class="py-2 px-3 text-indigo-300">${f.percentage}%</td>
+                  <td class="py-2 px-3 text-slate-300">${f.category}</td>
+                  <td class="py-2 px-3 text-slate-500 truncate max-w-xs" title="${f.folder_path}">${f.folder_path}</td>
+                  <td class="py-2 px-3 text-right">
+                    <button onclick="previewMedia('${f.path.replace(/\\/g, '\\\\')}', '${f.extension}')" 
+                            class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-[10px] transition font-sans">
+                      Ver
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>
     `;
   }
+
+  async cleanupAllEmptyFolders() {
+    if (!this.emptyFoldersData || !this.emptyFoldersData.folders || this.emptyFoldersData.folders.length === 0) {
+      showToast("No hay carpetas vacías para limpiar", "info");
+      return;
+    }
+    const paths = this.emptyFoldersData.folders.map(f => f.path);
+    if (!confirm(`¿Deseas eliminar las ${paths.length} carpetas vacías del disco?`)) return;
+
+    try {
+      const res = await fetch('/api/foldersizes/cleanup/empty-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_paths: paths })
+      });
+      const data = await res.json();
+      showToast(`Eliminadas ${data.deleted_count} carpetas vacías`, "success");
+      this.emptyFoldersData = null;
+      this.switchReportTab('empty_folders');
+    } catch (e) {
+      showToast("Error al limpiar carpetas vacías: " + e.message, "error");
+    }
+  }
+
+  async cleanupSingleFolder(path) {
+    try {
+      const res = await fetch('/api/foldersizes/cleanup/empty-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_paths: [path] })
+      });
+      showToast("Carpeta vacía eliminada", "success");
+      this.emptyFoldersData = null;
+      this.switchReportTab('empty_folders');
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  }
+
+  async recycleSingleFile(path) {
+    try {
+      const res = await fetch('/api/files/recycle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+      if (res.ok) {
+        showToast("Archivo enviado a la papelera", "success");
+        this.junkFilesData = null;
+        this.switchReportTab('junk_files');
+      }
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  }
+
+  downloadCSV() {
+    const tab = this.activeReportTab || 'largest';
+    const reportMap = {
+      'largest': 'largest_files',
+      'empty_folders': 'empty_folders',
+      'junk_files': 'junk_files',
+      'oldest_newest': 'oldest_files',
+      'long_paths': 'long_paths'
+    };
+    const rType = reportMap[tab] || 'largest_files';
+    window.open(`/api/foldersizes/export-csv?report_type=${rType}`, '_blank');
+  }
+
 
   renderTagTreemap(container) {
     if (!this.tagSpaceData) return;

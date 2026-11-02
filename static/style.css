@@ -159,3 +159,55 @@ body {
   opacity: 0.3;
 }
 
+/* ====================================================
+   BEYOND COMPARE: SPLIT SLIDER & CONTENT DIFF STYLES
+   ==================================================== */
+.split-image-container {
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+.split-slider-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: #6366f1;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.8);
+  cursor: ew-resize;
+  z-index: 30;
+}
+.split-slider-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  background-color: #6366f1;
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 11px;
+}
+
+/* Diff line striped pattern for blank sides */
+.diff-blank-hatch {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03) 8px, transparent 8px, transparent 16px);
+}
+
+/* Sunburst radial arcs */
+.sunburst-arc {
+  transition: opacity 0.15s ease, filter 0.15s ease;
+  cursor: pointer;
+}
+.sunburst-arc:hover {
+  opacity: 1 !important;
+  filter: brightness(1.25);
+}
+

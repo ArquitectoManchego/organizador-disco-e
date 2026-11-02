@@ -786,6 +786,79 @@ def get_tag_space_analytics():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- FolderSizes Pro: Advanced Specialized Reports ---
+
+@app.get("/api/foldersizes/reports/empty-folders")
+def get_empty_folders_endpoint(root: str = Query("E:\\")):
+    try:
+        return foldersizes_engine.get_empty_folders(root_dir=root)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class CleanupEmptyFoldersRequest(BaseModel):
+    folder_paths: List[str]
+
+@app.post("/api/foldersizes/cleanup/empty-folders")
+def cleanup_empty_folders_endpoint(req: CleanupEmptyFoldersRequest):
+    try:
+        return foldersizes_engine.cleanup_empty_folders(req.folder_paths)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/reports/oldest-files")
+def get_oldest_files_endpoint(parent_path: Optional[str] = None, limit: int = 100):
+    try:
+        return foldersizes_engine.get_oldest_files(parent_path=parent_path, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/reports/newest-files")
+def get_newest_files_endpoint(parent_path: Optional[str] = None, limit: int = 100):
+    try:
+        return foldersizes_engine.get_newest_files(parent_path=parent_path, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/reports/junk-files")
+def get_junk_files_endpoint(parent_path: Optional[str] = None):
+    try:
+        return foldersizes_engine.get_junk_files(parent_path=parent_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/reports/long-paths")
+def get_long_paths_endpoint(min_len: int = 240, limit: int = 200):
+    try:
+        return foldersizes_engine.get_long_paths(min_len=min_len, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/reports/depth-analysis")
+def get_depth_analysis_endpoint(max_depth: int = 6):
+    try:
+        return foldersizes_engine.get_depth_analysis(max_depth=max_depth)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/sunburst")
+def get_sunburst_endpoint(root: str = Query("E:\\"), max_depth: int = 3):
+    try:
+        return foldersizes_engine.get_sunburst_data(root_dir=root, max_depth=max_depth)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/foldersizes/export-csv")
+def export_csv_endpoint(report_type: str = Query("largest_files"), parent_path: Optional[str] = None):
+    try:
+        csv_data = foldersizes_engine.export_report_csv(report_type=report_type, parent_path=parent_path)
+        return Response(
+            content=csv_data,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=foldersizes_{report_type}.csv"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==========================================
 # MODULE 2: BEYOND COMPARE & DUPLICATE FINDER
 # ==========================================
@@ -804,6 +877,40 @@ def compare_folders_endpoint(req: CompareFoldersRequest):
             verify_full_hash=req.verify_full_hash
         )
         return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class CompareFileContentRequest(BaseModel):
+    left_path: str
+    right_path: str
+    diff_type: str = "auto"
+
+@app.post("/api/compare/file-content")
+def compare_file_content_endpoint(req: CompareFileContentRequest):
+    try:
+        return compare_engine.compare_file_contents(
+            left_path=req.left_path,
+            right_path=req.right_path,
+            diff_type=req.diff_type
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class SyncFoldersRequest(BaseModel):
+    left_path: str
+    right_path: str
+    mode: str = "update" # 'mirror', 'update', 'copy_left_to_right', 'copy_right_to_left'
+    item_rel_paths: Optional[List[str]] = None
+
+@app.post("/api/compare/sync")
+def sync_folders_endpoint(req: SyncFoldersRequest):
+    try:
+        return compare_engine.sync_folders(
+            left_dir=req.left_path,
+            right_dir=req.right_path,
+            mode=req.mode,
+            item_rel_paths=req.item_rel_paths
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

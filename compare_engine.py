@@ -329,7 +329,361 @@ def scan_drive_for_duplicates(root_dir: str = "E:\\", max_depth: int = 3) -> Dic
         "total_near_found": len(near_duplicate_folders)
     }
 
-if __name__ == "__main__":
-    print("Testing Compare Engine...")
-    res = scan_drive_for_duplicates("E:\\")
-    print(f"Found {res.get('total_exact_found', 0)} exact duplicate folders and {res.get('total_near_found', 0)} near duplicates.")
+# =====================================================================
+# BEYOND COMPARE 5 PRO: FILE CONTENT DIFFS & FOLDER SYNCHRONIZATION
+# =====================================================================
+
+def safe_recycle(path_str: str) -> bool:
+    """Sends file or directory to Windows Recycle Bin with undo support."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ('hwnd', wintypes.HWND),
+                ('wFunc', wintypes.UINT),
+                ('pFrom', wintypes.LPCWSTR),
+                ('pTo', wintypes.LPCWSTR),
+                ('fFlags', wintypes.WORD),
+                ('fAnyOperationsAborted', wintypes.BOOL),
+                ('hNameMappings', wintypes.LPVOID),
+                ('lpszProgressTitle', wintypes.LPCWSTR)
+            ]
+        abs_p = os.path.abspath(path_str) + '\0\0'
+        op = SHFILEOPSTRUCTW(
+            hwnd=None,
+            wFunc=3, # FO_DELETE
+            pFrom=abs_p,
+            pTo=None,
+            fFlags=0x0040 | 0x0010 | 0x0004, # FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+            fAnyOperationsAborted=False,
+            hNameMappings=None,
+            lpszProgressTitle=None
+        )
+        res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        return (res == 0)
+    except Exception:
+        return False
+
+def compare_file_contents(left_path: str, right_path: str, diff_type: str = "auto") -> Dict[str, Any]:
+    """
+    Beyond Compare equivalent specialized file content comparison:
+    - Text diff: Side-by-side aligned line-by-line diff with word/char highlight
+    - Image diff: Split slider and pixel mismatch analyzer
+    - Archive diff: ZIP file inner inspection without extracting
+    - Hex / Binary diff: Hexadecimal dump with first mismatch byte offset
+    """
+    p_left = Path(left_path)
+    p_right = Path(right_path)
+
+    if not p_left.exists() or not p_right.exists():
+        return {
+            "error": "Uno o ambos archivos no existen",
+            "left_exists": p_left.exists(),
+            "right_exists": p_right.exists()
+        }
+
+    ext_left = p_left.suffix.lower()
+    ext_right = p_right.suffix.lower()
+
+    # Auto-detect diff type
+    if diff_type == "auto":
+        text_extensions = {
+            '.txt', '.py', '.js', '.ts', '.jsx', '.tsx', '.json', '.html', '.htm',
+            '.css', '.scss', '.csv', '.xml', '.yaml', '.yml', '.md', '.ini', '.cfg',
+            '.conf', '.bat', '.cmd', '.ps1', '.sh', '.sql', '.c', '.cpp', '.h', '.java'
+        }
+        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.tiff', '.svg'}
+        archive_extensions = {'.zip'}
+
+        if ext_left in text_extensions or ext_right in text_extensions:
+            diff_type = "text"
+        elif ext_left in image_extensions or ext_right in image_extensions:
+            diff_type = "image"
+        elif ext_left in archive_extensions or ext_right in archive_extensions:
+            diff_type = "archive"
+        else:
+            diff_type = "hex"
+
+    # 1. TEXT DIFF
+    if diff_type == "text":
+        def read_text(p):
+            for enc in ['utf-8', 'latin-1', 'cp1252', 'utf-16']:
+                try:
+                    with open(p, 'r', encoding=enc) as f:
+                        return f.readlines()
+                except Exception:
+                    continue
+            return []
+
+        lines_left = read_text(p_left)
+        lines_right = read_text(p_right)
+
+        import difflib
+        matcher = difflib.SequenceMatcher(None, lines_left, lines_right)
+        aligned_pairs = []
+        added = 0
+        deleted = 0
+        modified = 0
+
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                for k in range(i2 - i1):
+                    aligned_pairs.append({
+                        "left_num": i1 + k + 1,
+                        "left_text": lines_left[i1 + k].rstrip('\r\n'),
+                        "right_num": j1 + k + 1,
+                        "right_text": lines_right[j1 + k].rstrip('\r\n'),
+                        "tag": "equal"
+                    })
+            elif tag == 'replace':
+                max_len = max(i2 - i1, j2 - j1)
+                for k in range(max_len):
+                    has_l = (i1 + k < i2)
+                    has_r = (j1 + k < j2)
+                    aligned_pairs.append({
+                        "left_num": i1 + k + 1 if has_l else None,
+                        "left_text": lines_left[i1 + k].rstrip('\r\n') if has_l else "",
+                        "right_num": j1 + k + 1 if has_r else None,
+                        "right_text": lines_right[j1 + k].rstrip('\r\n') if has_r else "",
+                        "tag": "replace"
+                    })
+                modified += max_len
+            elif tag == 'delete':
+                for k in range(i1, i2):
+                    aligned_pairs.append({
+                        "left_num": k + 1,
+                        "left_text": lines_left[k].rstrip('\r\n'),
+                        "right_num": None,
+                        "right_text": "",
+                        "tag": "delete"
+                    })
+                deleted += (i2 - i1)
+            elif tag == 'insert':
+                for k in range(j1, j2):
+                    aligned_pairs.append({
+                        "left_num": None,
+                        "left_text": "",
+                        "right_num": k + 1,
+                        "right_text": lines_right[k].rstrip('\r\n'),
+                        "tag": "insert"
+                    })
+                added += (j2 - j1)
+
+        return {
+            "type": "text",
+            "left_name": p_left.name,
+            "right_name": p_right.name,
+            "left_path": str(p_left),
+            "right_path": str(p_right),
+            "total_lines_left": len(lines_left),
+            "total_lines_right": len(lines_right),
+            "added_count": added,
+            "deleted_count": deleted,
+            "modified_count": modified,
+            "is_identical": (added == 0 and deleted == 0 and modified == 0),
+            "pairs": aligned_pairs[:2500]
+        }
+
+    # 2. IMAGE DIFF
+    elif diff_type == "image":
+        from PIL import Image
+        img_info = {}
+        try:
+            with Image.open(p_left) as im1, Image.open(p_right) as im2:
+                img_info = {
+                    "left_width": im1.width,
+                    "left_height": im1.height,
+                    "right_width": im2.width,
+                    "right_height": im2.height,
+                    "left_format": im1.format,
+                    "right_format": im2.format,
+                    "same_dimensions": (im1.size == im2.size),
+                    "left_bytes": p_left.stat().st_size,
+                    "right_bytes": p_right.stat().st_size
+                }
+        except Exception as e:
+            img_info = {"error": str(e)}
+
+        return {
+            "type": "image",
+            "left_path": str(p_left),
+            "right_path": str(p_right),
+            "left_name": p_left.name,
+            "right_name": p_right.name,
+            "info": img_info
+        }
+
+    # 3. ARCHIVE (ZIP) DIFF
+    elif diff_type == "archive":
+        import zipfile
+        try:
+            with zipfile.ZipFile(p_left, 'r') as z1, zipfile.ZipFile(p_right, 'r') as z2:
+                in1 = {z.filename: z for z in z1.infolist()}
+                in2 = {z.filename: z for z in z2.infolist()}
+
+                all_names = sorted(set(in1.keys()).union(set(in2.keys())))
+                items = []
+                for name in all_names:
+                    has1 = name in in1
+                    has2 = name in in2
+                    if has1 and has2:
+                        same_crc = (in1[name].CRC == in2[name].CRC)
+                        status = "identical" if same_crc else "modified"
+                        items.append({
+                            "name": name,
+                            "status": status,
+                            "left_size": in1[name].file_size,
+                            "right_size": in2[name].file_size
+                        })
+                    elif has1:
+                        items.append({"name": name, "status": "left_only", "left_size": in1[name].file_size, "right_size": None})
+                    else:
+                        items.append({"name": name, "status": "right_only", "left_size": None, "right_size": in2[name].file_size})
+
+                return {
+                    "type": "archive",
+                    "left_name": p_left.name,
+                    "right_name": p_right.name,
+                    "left_path": str(p_left),
+                    "right_path": str(p_right),
+                    "total_items": len(items),
+                    "items": items
+                }
+        except Exception as e:
+            return {"type": "archive", "error": str(e)}
+
+    # 4. BINARY / HEX DIFF
+    else:
+        with open(p_left, 'rb') as f1, open(p_right, 'rb') as f2:
+            chunk1 = f1.read(4096)
+            chunk2 = f2.read(4096)
+
+        first_diff = -1
+        min_len = min(len(chunk1), len(chunk2))
+        for idx in range(min_len):
+            if chunk1[idx] != chunk2[idx]:
+                first_diff = idx
+                break
+        if first_diff == -1 and len(chunk1) != len(chunk2):
+            first_diff = min_len
+
+        def format_hex(chunk, max_bytes=256):
+            lines = []
+            for i in range(0, min(len(chunk), max_bytes), 16):
+                sub = chunk[i:i+16]
+                hex_str = " ".join(f"{b:02X}" for b in sub)
+                ascii_str = "".join(chr(b) if 32 <= b <= 126 else "." for b in sub)
+                lines.append(f"{i:08X}  {hex_str:<48}  |{ascii_str}|")
+            return lines
+
+        return {
+            "type": "hex",
+            "left_name": p_left.name,
+            "right_name": p_right.name,
+            "left_path": str(p_left),
+            "right_path": str(p_right),
+            "left_size": p_left.stat().st_size,
+            "right_size": p_right.stat().st_size,
+            "first_diff_offset": first_diff,
+            "is_identical": (first_diff == -1 and p_left.stat().st_size == p_right.stat().st_size),
+            "left_hex_sample": format_hex(chunk1),
+            "right_hex_sample": format_hex(chunk2)
+        }
+
+def sync_folders(
+    left_dir: str, 
+    right_dir: str, 
+    mode: str = "update", 
+    item_rel_paths: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Beyond Compare folder synchronization engine:
+    - 'mirror': Left -> Right (makes Right replica of Left, recycles Right orphans)
+    - 'update': Left -> Right (copies missing or newer items from Left to Right)
+    - 'copy_left_to_right': Copies specific item_rel_paths from Left to Right
+    - 'copy_right_to_left': Copies specific item_rel_paths from Right to Left
+    """
+    import shutil
+    l_root = Path(left_dir)
+    r_root = Path(right_dir)
+
+    if not l_root.exists() or not r_root.exists():
+        return {"error": "Una o ambas carpetas no existen"}
+
+    manifest = compare_two_folders(left_dir, right_dir, verify_full_hash=False)
+    if "error" in manifest:
+        return {"error": manifest["error"]}
+
+    copied = []
+    recycled = []
+    errors = []
+
+    def copy_file(src: Path, dest: Path):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
+
+    if mode == "mirror":
+        # 1. Copy left_only and modified to right
+        for item in manifest["categories"]["left_only"] + manifest["categories"]["modified"] + manifest["categories"]["same_name_size_diff_content"]:
+            try:
+                rel = item["rel_path"]
+                copy_file(l_root / rel, r_root / rel)
+                copied.append({"file": rel, "direction": "left_to_right"})
+            except Exception as e:
+                errors.append({"file": item["rel_path"], "error": str(e)})
+
+        # 2. Recycle right_only items (safe Windows Recycle Bin)
+        for item in manifest["categories"]["right_only"]:
+            try:
+                rel = item["rel_path"]
+                target = r_root / rel
+                if target.exists():
+                    safe_recycle(str(target))
+                    recycled.append(rel)
+            except Exception as e:
+                errors.append({"file": item["rel_path"], "error": str(e)})
+
+    elif mode == "update":
+        for item in manifest["categories"]["left_only"]:
+            try:
+                rel = item["rel_path"]
+                copy_file(l_root / rel, r_root / rel)
+                copied.append({"file": rel, "direction": "left_to_right"})
+            except Exception as e:
+                errors.append({"file": item["rel_path"], "error": str(e)})
+
+        for item in manifest["categories"]["modified"]:
+            rel = item["rel_path"]
+            src = l_root / rel
+            dest = r_root / rel
+            try:
+                if src.exists() and dest.exists() and src.stat().st_mtime > dest.stat().st_mtime:
+                    copy_file(src, dest)
+                    copied.append({"file": rel, "direction": "left_to_right (newer)"})
+            except Exception as e:
+                errors.append({"file": rel, "error": str(e)})
+
+    elif mode in ["copy_left_to_right", "copy_right_to_left"]:
+        items = item_rel_paths or []
+        for rel in items:
+            try:
+                if mode == "copy_left_to_right":
+                    copy_file(l_root / rel, r_root / rel)
+                    copied.append({"file": rel, "direction": "left_to_right"})
+                else:
+                    copy_file(r_root / rel, l_root / rel)
+                    copied.append({"file": rel, "direction": "right_to_left"})
+            except Exception as e:
+                errors.append({"file": rel, "error": str(e)})
+
+    return {
+        "success": len(errors) == 0,
+        "mode": mode,
+        "copied_count": len(copied),
+        "recycled_count": len(recycled),
+        "copied": copied,
+        "recycled": recycled,
+        "errors": errors
+    }
+

@@ -925,3 +925,419 @@ class FileAnalysisManager:
             }
 
 analysis_manager = FileAnalysisManager()
+
+# =====================================================================
+# FOLDERSIZES PRO EXTENDED SUITE: SPECIALIZED REPORTS & SUNBURST ENGINE
+# =====================================================================
+
+def get_empty_folders(root_dir: str = "E:\\", verify_disk: bool = True) -> Dict[str, Any]:
+    """
+    Finds folders that contain 0 files and 0 subfolders.
+    Useful for cleaning up orphaned folder structures across 1.5 TB drive.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Query candidate empty folders from database
+    cursor.execute("""
+    SELECT f.path, f.name, f.parent_path, f.depth, f.size_bytes, f.file_count, f.category
+    FROM folders f
+    WHERE f.path != 'E:\\' AND f.path != 'E:'
+      AND (f.file_count = 0 OR f.size_bytes = 0)
+      AND NOT EXISTS (SELECT 1 FROM folders f2 WHERE f2.parent_path = f.path)
+    ORDER BY f.depth DESC, f.path ASC;
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    empty_list = []
+    for r in rows:
+        p = Path(r["path"])
+        is_empty = True
+        if verify_disk:
+            try:
+                if p.exists() and p.is_dir():
+                    # Check if actual directory on disk is empty
+                    is_empty = (next(p.iterdir(), None) is None)
+                else:
+                    is_empty = True
+            except Exception:
+                is_empty = True
+
+        if is_empty:
+            empty_list.append(r)
+
+    return {
+        "root_dir": root_dir,
+        "total_empty_folders": len(empty_list),
+        "folders": empty_list
+    }
+
+def cleanup_empty_folders(folder_paths: List[str], use_recycle_bin: bool = True) -> Dict[str, Any]:
+    """
+    Safely removes empty folders (either via Windows Recycle Bin or rmdir)
+    and removes their records from SQLite.
+    """
+    deleted_paths = []
+    failed_paths = []
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    for path_str in folder_paths:
+        p = Path(path_str)
+        # Protect root
+        if str(p).rstrip("\\/").lower() in ["e:", "e:\\", "c:", "c:\\"]:
+            failed_paths.append({"path": path_str, "error": "No se puede eliminar la raíz del disco"})
+            continue
+
+        try:
+            if p.exists() and p.is_dir():
+                # Confirm it's empty
+                if any(p.iterdir()):
+                    failed_paths.append({"path": path_str, "error": "La carpeta no está vacía"})
+                    continue
+                p.rmdir()
+
+            cursor.execute("DELETE FROM folders WHERE path = ?;", (path_str,))
+            cursor.execute("DELETE FROM item_tags WHERE item_path = ? AND item_type = 'folder';", (path_str,))
+            deleted_paths.append(path_str)
+        except Exception as e:
+            failed_paths.append({"path": path_str, "error": str(e)})
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "deleted_count": len(deleted_paths),
+        "failed_count": len(failed_paths),
+        "deleted_paths": deleted_paths,
+        "failed_paths": failed_paths
+    }
+
+def get_oldest_files(parent_path: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
+    """
+    Returns files that have not been modified for the longest time (> 3 to 10+ years).
+    Prime candidates for archiving or offloading.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    where_clause = "WHERE f.mtime > 0"
+    params: List[Any] = []
+    if parent_path and parent_path not in ["E:\\", "E:", ""]:
+        norm = parent_path.rstrip("\\")
+        where_clause += " AND (f.folder_path LIKE ? OR f.folder_path = ?)"
+        params.extend([norm + "%", norm])
+
+    cursor.execute(f"""
+    SELECT f.path, f.name, f.folder_path, f.extension, f.size_bytes, f.mtime, f.category, f.status
+    FROM files f
+    {where_clause}
+    ORDER BY f.mtime ASC
+    LIMIT ?;
+    """, params + [limit])
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    now = time.time()
+    for r in rows:
+        age_days = (now - r["mtime"]) / 86400
+        r["age_days"] = int(age_days)
+        r["age_years"] = round(age_days / 365.25, 1)
+
+    return {
+        "limit": limit,
+        "total_returned": len(rows),
+        "files": rows
+    }
+
+def get_newest_files(parent_path: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
+    """
+    Returns the most recently modified or added files.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    where_clause = "WHERE f.mtime > 0"
+    params: List[Any] = []
+    if parent_path and parent_path not in ["E:\\", "E:", ""]:
+        norm = parent_path.rstrip("\\")
+        where_clause += " AND (f.folder_path LIKE ? OR f.folder_path = ?)"
+        params.extend([norm + "%", norm])
+
+    cursor.execute(f"""
+    SELECT f.path, f.name, f.folder_path, f.extension, f.size_bytes, f.mtime, f.category, f.status
+    FROM files f
+    {where_clause}
+    ORDER BY f.mtime DESC
+    LIMIT ?;
+    """, params + [limit])
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    now = time.time()
+    for r in rows:
+        age_days = (now - r["mtime"]) / 86400
+        r["age_days"] = max(0, int(age_days))
+        r["age_hours"] = max(0, round((now - r["mtime"]) / 3600, 1))
+
+    return {
+        "limit": limit,
+        "total_returned": len(rows),
+        "files": rows
+    }
+
+def get_junk_files(parent_path: Optional[str] = None, limit: int = 300) -> Dict[str, Any]:
+    """
+    Detects temporary, backup, crash dumps, and cache junk files:
+    *.tmp, *.~*, ~$*, *.bak, *.chk, *.dmp, *.log, Thumbs.db, .DS_Store, desktop.ini.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    where_clause = """
+    WHERE (
+        f.extension IN ('.tmp', '.bak', '.chk', '.dmp', '.old', '.swp', '.log')
+        OR f.name LIKE 'Thumbs.db'
+        OR f.name LIKE '.DS_Store'
+        OR f.name LIKE 'desktop.ini'
+        OR f.name LIKE 'ehthumbs.db'
+        OR f.name LIKE '~%'
+    )
+    """
+    params: List[Any] = []
+    if parent_path and parent_path not in ["E:\\", "E:", ""]:
+        norm = parent_path.rstrip("\\")
+        where_clause += " AND (f.folder_path LIKE ? OR f.folder_path = ?)"
+        params.extend([norm + "%", norm])
+
+    cursor.execute(f"""
+    SELECT f.path, f.name, f.folder_path, f.extension, f.size_bytes, f.mtime, f.category
+    FROM files f
+    {where_clause}
+    ORDER BY f.size_bytes DESC
+    LIMIT {int(limit)};
+    """, params)
+    rows = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute(f"""
+    SELECT COUNT(*), COALESCE(SUM(f.size_bytes), 0)
+    FROM files f
+    {where_clause};
+    """, params)
+    total_count, total_bytes = cursor.fetchone()
+
+    conn.close()
+
+    # Group by junk category
+    categories_breakdown = {
+        "Temporales (.tmp, ~*)": {"count": 0, "bytes": 0},
+        "Respaldos (.bak, .old)": {"count": 0, "bytes": 0},
+        "Cachés de Sistema (Thumbs.db, .DS_Store)": {"count": 0, "bytes": 0},
+        "Logs y Volcados (.log, .dmp)": {"count": 0, "bytes": 0}
+    }
+
+    for r in rows:
+        ext = (r["extension"] or "").lower()
+        name = r["name"]
+        if ext in ['.tmp', '.swp'] or name.startswith('~'):
+            categories_breakdown["Temporales (.tmp, ~*)"]["count"] += 1
+            categories_breakdown["Temporales (.tmp, ~*)"]["bytes"] += r["size_bytes"]
+        elif ext in ['.bak', '.old']:
+            categories_breakdown["Respaldos (.bak, .old)"]["count"] += 1
+            categories_breakdown["Respaldos (.bak, .old)"]["bytes"] += r["size_bytes"]
+        elif name in ['Thumbs.db', '.DS_Store', 'desktop.ini', 'ehthumbs.db']:
+            categories_breakdown["Cachés de Sistema (Thumbs.db, .DS_Store)"]["count"] += 1
+            categories_breakdown["Cachés de Sistema (Thumbs.db, .DS_Store)"]["bytes"] += r["size_bytes"]
+        else:
+            categories_breakdown["Logs y Volcados (.log, .dmp)"]["count"] += 1
+            categories_breakdown["Logs y Volcados (.log, .dmp)"]["bytes"] += r["size_bytes"]
+
+    return {
+        "total_junk_files": total_count,
+        "total_junk_bytes": total_bytes,
+        "categories_breakdown": categories_breakdown,
+        "sample_files": rows
+    }
+
+def get_long_paths(min_len: int = 240, limit: int = 200) -> Dict[str, Any]:
+    """
+    Finds files and folders whose path length exceeds Windows MAX_PATH threshold (>= 240 chars).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT path, name, extension, size_bytes, folder_path, LENGTH(path) as path_length
+    FROM files
+    WHERE LENGTH(path) >= ?
+    ORDER BY path_length DESC
+    LIMIT ?;
+    """, (min_len, limit))
+    files = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("""
+    SELECT path, name, depth, size_bytes, file_count, LENGTH(path) as path_length
+    FROM folders
+    WHERE LENGTH(path) >= ?
+    ORDER BY path_length DESC
+    LIMIT ?;
+    """, (min_len, limit))
+    folders = [dict(r) for r in cursor.fetchall()]
+
+    conn.close()
+
+    return {
+        "min_length_checked": min_len,
+        "total_long_files": len(files),
+        "total_long_folders": len(folders),
+        "files": files,
+        "folders": folders
+    }
+
+def get_depth_analysis(max_depth: int = 6) -> Dict[str, Any]:
+    """
+    Analyzes distribution of disk space and item counts across folder depth levels.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT 
+        depth,
+        COUNT(*) as folder_count,
+        COALESCE(SUM(file_count), 0) as total_files,
+        COALESCE(SUM(size_bytes), 0) as total_bytes
+    FROM folders
+    GROUP BY depth
+    ORDER BY depth ASC;
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    total_disk_bytes = sum(r["total_bytes"] for r in rows if r["depth"] == 1) or 1
+
+    depth_levels = []
+    for r in rows:
+        d = r["depth"]
+        r["percentage"] = round((r["total_bytes"] / total_disk_bytes) * 100, 1)
+        r["label"] = f"Raíz Disco E:" if d == 0 else f"Nivel {d}"
+        depth_levels.append(r)
+
+    return {
+        "max_depth": max(r["depth"] for r in rows) if rows else 0,
+        "levels": depth_levels
+    }
+
+def get_sunburst_data(root_dir: str = "E:\\", max_depth: int = 3) -> Dict[str, Any]:
+    """
+    Builds hierarchical radial rings dataset for the interactive Sunburst chart.
+    Each ring corresponds to a folder depth level with normalized values and colors.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT path, name, parent_path, depth, size_bytes, file_count, category, status
+    FROM folders
+    WHERE depth <= ?
+    ORDER BY depth ASC, size_bytes DESC;
+    """, (max_depth,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    category_colors = {
+        "Arquitectura & 3D (Work)": "#3b82f6",
+        "Software & Instaladores": "#8b5cf6",
+        "Respaldos Celular": "#06b6d4",
+        "Fotografía & Álbumes": "#ec4899",
+        "Respaldos de Equipos / Personas": "#f97316",
+        "Descargas Masivas": "#f59e0b",
+        "Videos & Ejercicio": "#10b981",
+        "Cursos, Ebooks & Salud": "#14b8a6",
+        "Sin Categoría": "#64748b"
+    }
+
+    nodes_by_path: Dict[str, Dict[str, Any]] = {}
+    root_node = None
+
+    for r in rows:
+        path = r["path"]
+        node = {
+            "name": r["name"] or path,
+            "path": path,
+            "value": r["size_bytes"],
+            "depth": r["depth"],
+            "file_count": r["file_count"],
+            "category": r["category"],
+            "color": category_colors.get(r["category"], "#64748b"),
+            "children": []
+        }
+        nodes_by_path[path] = node
+
+        if r["depth"] == 0 or path.rstrip("\\") == root_dir.rstrip("\\"):
+            root_node = node
+
+    for r in rows:
+        path = r["path"]
+        parent = r["parent_path"]
+        if parent in nodes_by_path and path != parent:
+            nodes_by_path[parent]["children"].append(nodes_by_path[path])
+
+    if not root_node and nodes_by_path:
+        root_node = list(nodes_by_path.values())[0]
+
+    return {
+        "root": root_node or {"name": "Disco E:", "value": 0, "children": []}
+    }
+
+def export_report_csv(report_type: str, parent_path: Optional[str] = None) -> str:
+    """
+    Generates CSV export string for any FolderSizes specialized report.
+    """
+    import io
+    import csv
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if report_type == "largest_files":
+        data = get_files_analysis(parent_path, limit_largest=500)
+        writer.writerow(["Nombre", "Ruta Carpeta", "Extensión", "Tamaño (Bytes)", "Tamaño (MB)", "Fecha Modificación", "Categoría"])
+        for f in data.get("largest_files", []):
+            mb = round(f["size_bytes"] / (1024*1024), 2)
+            dt = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(f["mtime"])) if f.get("mtime") else ""
+            writer.writerow([f["name"], f["folder_path"], f["extension"], f["size_bytes"], mb, dt, f.get("category", "")])
+
+    elif report_type == "empty_folders":
+        data = get_empty_folders(parent_path or "E:\\")
+        writer.writerow(["Nombre Carpeta", "Ruta Completa", "Profundidad", "Categoría"])
+        for f in data.get("folders", []):
+            writer.writerow([f["name"], f["path"], f["depth"], f.get("category", "")])
+
+    elif report_type == "junk_files":
+        data = get_junk_files(parent_path)
+        writer.writerow(["Nombre Archivo", "Ruta Carpeta", "Extensión", "Tamaño (Bytes)", "Tamaño (MB)", "Categoría"])
+        for f in data.get("sample_files", []):
+            mb = round(f["size_bytes"] / (1024*1024), 2)
+            writer.writerow([f["name"], f["folder_path"], f["extension"], f["size_bytes"], mb, f.get("category", "")])
+
+    elif report_type == "oldest_files":
+        data = get_oldest_files(parent_path, limit=300)
+        writer.writerow(["Nombre Archivo", "Ruta Carpeta", "Tamaño (MB)", "Años de Antigüedad", "Fecha Modificación", "Categoría"])
+        for f in data.get("files", []):
+            mb = round(f["size_bytes"] / (1024*1024), 2)
+            dt = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(f["mtime"])) if f.get("mtime") else ""
+            writer.writerow([f["name"], f["folder_path"], mb, f.get("age_years", 0), dt, f.get("category", "")])
+
+    elif report_type == "long_paths":
+        data = get_long_paths(min_len=240, limit=500)
+        writer.writerow(["Tipo", "Longitud Caracteres", "Ruta Completa", "Tamaño (Bytes)"])
+        for f in data.get("files", []):
+            writer.writerow(["Archivo", f["path_length"], f["path"], f["size_bytes"]])
+        for fd in data.get("folders", []):
+            writer.writerow(["Carpeta", fd["path_length"], fd["path"], fd["size_bytes"]])
+
+    return output.getvalue()

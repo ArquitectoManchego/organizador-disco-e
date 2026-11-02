@@ -80,14 +80,38 @@ window.fetch = async function(url, options = {}) {
         return new Response(JSON.stringify(snap.drive_duplicates), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/recycle-bin')) {
         return new Response(JSON.stringify(snap.recycle_bin || { items: [], total_files: 0, total_bytes: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/reports/empty-folders')) {
+        return new Response(JSON.stringify(snap.empty_folders || { empty_folders_count: 0, folders: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/reports/junk-files')) {
+        return new Response(JSON.stringify(snap.junk_files || { total_junk_files: 0, total_junk_bytes: 0, files: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/reports/oldest-files')) {
+        return new Response(JSON.stringify(snap.oldest_files || { files: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/reports/newest-files')) {
+        return new Response(JSON.stringify(snap.newest_files || { files: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/reports/long-paths')) {
+        return new Response(JSON.stringify(snap.long_paths || { long_paths_count: 0, files: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/reports/depth-analysis')) {
+        return new Response(JSON.stringify(snap.depth_analysis || { max_depth: 0, levels: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/foldersizes/sunburst')) {
+        return new Response(JSON.stringify(snap.sunburst || {}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } else if (url.includes('/api/compare/folders')) {
+        return new Response(JSON.stringify(snap.sample_comparison || {}), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } else if (url.includes('/api/explore')) {
         const u = new URL(url, 'http://localhost');
         const p = u.searchParams.get('path') || 'E:\\';
-        const cachedExplored = snap.explore_cache[p] || snap.explore_cache['E:\\'];
+        const cachedExplored = (snap.explore_cache && (snap.explore_cache[p] || snap.explore_cache['E:\\']));
         if (cachedExplored) {
           return new Response(JSON.stringify(cachedExplored), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
       }
+    }
+  }
+
+  // Fallback for POST /api/compare/folders when offline
+  if (isApi && url.includes('/api/compare/folders')) {
+    const snap = await getSnapshot();
+    if (snap && snap.sample_comparison) {
+      return new Response(JSON.stringify(snap.sample_comparison), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
   }
 

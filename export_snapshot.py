@@ -190,8 +190,24 @@ def export_all():
         "total_files": rb_count,
         "total_bytes": rb_bytes
     }
-
     conn.close()
+
+    # 8. FolderSizes Pro Specialized Reports
+    print("Exporting FolderSizes Pro reports...")
+    empty_folders = foldersizes_engine.get_empty_folders("E:\\")
+    oldest_files = foldersizes_engine.get_oldest_files("E:\\", limit=100)
+    newest_files = foldersizes_engine.get_newest_files("E:\\", limit=100)
+    junk_files = foldersizes_engine.get_junk_files("E:\\", limit=150)
+    long_paths = foldersizes_engine.get_long_paths(min_len=240, limit=100)
+    depth_analysis = foldersizes_engine.get_depth_analysis(max_depth=6)
+    sunburst = foldersizes_engine.get_sunburst_data("E:\\", max_depth=3)
+
+    # 9. Beyond Compare Sample Comparison
+    print("Exporting Beyond Compare sample comparison...")
+    sample_comparison = compare_engine.compare_two_folders(
+        "E:\\WORK\\Leslie Carrillo - Entrega 28 Mayo", 
+        "E:\\WORK\\TODO REVISAR DUPLICADOS\\Leslie Carrillo - Entrega 28 Mayo"
+    )
 
     snapshot = {
         "drive_info": drive_info,
@@ -203,7 +219,15 @@ def export_all():
         "tag_space": tag_space,
         "drive_duplicates": drive_dupes,
         "recycle_bin": recycle_bin_data,
-        "explore_cache": explored_cache
+        "explore_cache": explored_cache,
+        "empty_folders": empty_folders,
+        "oldest_files": oldest_files,
+        "newest_files": newest_files,
+        "junk_files": junk_files,
+        "long_paths": long_paths,
+        "depth_analysis": depth_analysis,
+        "sunburst": sunburst,
+        "sample_comparison": sample_comparison
     }
 
     with open(out_file, "w", encoding="utf-8") as f:
